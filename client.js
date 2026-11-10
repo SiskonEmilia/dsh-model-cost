@@ -1891,6 +1891,11 @@ window.__ModuleLoader__.load({
       // Flat-priced calls are neither peak nor off-peak; keep them visible by
       // giving the remainder of the cost its own segment.
       const flatOf = point => Math.max(0, point.cost - point.peakCost - point.offpeakCost)
+      // The bar's height is the bucket's share of the tallest one; inside it the
+      // three tariff segments split that height by their share of the bucket's
+      // cost, so they always sum to the full bar. Absolute amounts here would
+      // leave the rest of the bar on its track colour.
+      const shareOf = (point, value) => (point.cost > 0 ? value / point.cost : 0)
       const hasFlat = metric === 'cost' && view.points.some(point => flatOf(point) > 0)
       const heightOf = point => {
         const amount = valueOf(point)
@@ -2053,9 +2058,9 @@ window.__ModuleLoader__.load({
                         'aria-hidden': true,
                       }, metric === 'cost'
                         ? [
-                            h('span', { key: 'offpeak', className: 'dsh-mc-trend-seg dsh-mc-trend-offpeak', style: { flexGrow: point.offpeakCost } }),
-                            h('span', { key: 'peak', className: 'dsh-mc-trend-seg dsh-mc-trend-peak', style: { flexGrow: point.peakCost } }),
-                            h('span', { key: 'flat', className: 'dsh-mc-trend-seg dsh-mc-trend-solid', style: { flexGrow: flatOf(point) } }),
+                            h('span', { key: 'offpeak', className: 'dsh-mc-trend-seg dsh-mc-trend-offpeak', style: { flexGrow: shareOf(point, point.offpeakCost) } }),
+                            h('span', { key: 'peak', className: 'dsh-mc-trend-seg dsh-mc-trend-peak', style: { flexGrow: shareOf(point, point.peakCost) } }),
+                            h('span', { key: 'flat', className: 'dsh-mc-trend-seg dsh-mc-trend-solid', style: { flexGrow: shareOf(point, flatOf(point)) } }),
                           ]
                         : h('span', { key: 'solid', className: 'dsh-mc-trend-seg dsh-mc-trend-solid', style: { flexGrow: 1 } }))))),
                   tip)),
