@@ -675,7 +675,7 @@ window.__ModuleLoader__.load({
 .dsh-mc-sources { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .dsh-mc-sources-label { color: var(--dsw-alias-label-tertiary); font-size: 12px; }
 .dsh-mc-chips { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
-.dsh-mc-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 240px; height: 24px; padding: 0 9px 0 7px; border: .5px solid var(--dsw-alias-border-l2); border-radius: 12px; background: transparent; color: var(--dsw-alias-label-secondary); font: inherit; font-size: 12px; line-height: 1; cursor: pointer; }
+.dsh-mc-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 240px; min-height: 24px; padding: 0 9px 0 7px; border: .5px solid var(--dsw-alias-border-l2); border-radius: 12px; background: transparent; color: var(--dsw-alias-label-secondary); font: inherit; font-size: 12px; line-height: 20px; cursor: pointer; }
 .dsh-mc-chip:hover { background: var(--dsw-alias-interactive-bg-hover); }
 .dsh-mc-chip:focus-visible { outline: 1px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }
 .dsh-mc-chip-mark { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 12px; height: 12px; border: .5px solid var(--dsw-alias-border-l2); border-radius: 3px; color: transparent; font-size: 9px; line-height: 1; }
