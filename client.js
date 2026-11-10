@@ -739,10 +739,10 @@ window.__ModuleLoader__.load({
 .dsh-mc-trend-solid { background: var(--dsw-static-deepseek-450, #5686fe); }
 .dsh-mc-trend-peak { background: var(--dsw-alias-state-warn-primary); }
 .dsh-mc-trend-offpeak { background: var(--dsw-alias-state-success-primary); }
-.dsh-mc-trend-cacheread { background: var(--dsw-static-deepseek-600, #4868b2); }
-.dsh-mc-trend-cachewrite { background: var(--dsw-static-deepseek-500, #4176e6); }
-.dsh-mc-trend-input { background: var(--dsw-static-deepseek-450, #5686fe); }
-.dsh-mc-trend-output { background: var(--dsw-static-deepseek-400, #7aaaff); }
+.dsh-mc-trend-cacheread { background: var(--dsw-static-deepseek-300, #b7c8fe); }
+.dsh-mc-trend-cachewrite { background: var(--dsw-static-deepseek-400, #7aaaff); }
+.dsh-mc-trend-input { background: var(--dsw-static-deepseek-500, #4176e6); }
+.dsh-mc-trend-output { background: var(--dsw-static-deepseek-600, #4868b2); }
 .dsh-mc-trend-xaxis { display: flex; margin-left: 56px; color: var(--dsw-alias-label-tertiary); font-size: 9px; line-height: 12px; }
 .dsh-mc-trend-tick { flex: 1 1 0; min-width: 0; text-align: center; white-space: nowrap; overflow: visible; }
 .dsh-mc-section.dsh-mc-trend-section { overflow: visible; }
