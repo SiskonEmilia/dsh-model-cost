@@ -1,7 +1,18 @@
-# dsh-model-cost
+<h1 align="center">dsh-model-cost</h1>
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-![DeepSeek Harness plugin](https://img.shields.io/badge/DeepSeek%20Harness-plugin-4176e6)
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-5686fe.svg" alt="License: MIT" /></a>
+  <img src="https://img.shields.io/badge/DeepSeek%20Harness-plugin-4176e6" alt="DeepSeek Harness plugin" />
+  <img src="https://img.shields.io/badge/LiteLLM-cost%20map-7aaaff" alt="LiteLLM cost map" />
+</p>
+
+<p align="center">
+  <img src="docs/images/hero.png" alt="dsh-model-cost — DeepSeek Harness 模型成本插件" />
+</p>
+
+<p align="center">
+  把会话日志里的每次模型调用折算成美元——输入框实时花费、峰谷定价、新会话价签、全局统计与价格映射。
+</p>
 
 DeepSeek Harness 的模型花费统计插件。它把会话日志里每次模型调用的 usage
 （未缓存输入 / 缓存读 / 缓存写 / 输出）按 [LiteLLM Model Cost Map](https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json)
