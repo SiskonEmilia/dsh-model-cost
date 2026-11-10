@@ -670,32 +670,44 @@ export default class ModelCostService extends Service {
     }
 
     let phase = null
-    if (now !== null && last !== null) {
-      const resolution = this.resolve(last.provider, last.model)
-      const current = resolution === null ? null : phaseAt(resolution.entry, now)
-      const schedule = resolution?.entry.offPeak ?? null
-      phase = {
-        provider: last.provider,
-        model: last.model,
-        key: resolution?.key ?? null,
-        via: resolution?.via ?? null,
-        state: resolution === null ? 'unresolved' : current.state,
-        nextAt: current?.nextAt ?? null,
-        nextState: current === null || current.state === 'flat'
-          ? null
-          : current.state === 'offpeak' ? 'peak' : 'offpeak',
-        rates: current === null ? null : perMillion(current.rates),
-        standard: resolution === null ? null : perMillion(standardRates(resolution.entry)),
-        timeZone,
-        timeline: dayTimeline(schedule, now, timeZone),
-        hasSchedule: schedule !== null,
-        source: typeof resolution?.entry.source === 'string' ? resolution.entry.source : null,
-      }
-    }
+    if (now !== null && last !== null) phase = this.describeRoute(last.provider, last.model, now, timeZone)
     return {
       totals,
       models: [...routes.values()].sort((left, right) => right.cost - left.cost),
       phase,
+    }
+  }
+
+  /**
+   * Describe the tariff one route bills under at an instant: the price key it
+   * resolves to, the state now in force, the rates that state applies, and
+   * today's windows for the timeline.
+   * @param {string|null} provider - provider id recorded for the call.
+   * @param {string|null} model - model id recorded for the call.
+   * @param {number} now - instant to describe.
+   * @param {string} timeZone - viewer's IANA zone, used for today's windows.
+   * @returns {object} route, tariff state, current and standard rates, and today's windows.
+   */
+  describeRoute(provider, model, now, timeZone) {
+    const resolution = this.resolve(provider, model)
+    const current = resolution === null ? null : phaseAt(resolution.entry, now)
+    const schedule = resolution?.entry.offPeak ?? null
+    return {
+      provider,
+      model,
+      key: resolution?.key ?? null,
+      via: resolution?.via ?? null,
+      state: resolution === null ? 'unresolved' : current.state,
+      nextAt: current?.nextAt ?? null,
+      nextState: current === null || current.state === 'flat'
+        ? null
+        : current.state === 'offpeak' ? 'peak' : 'offpeak',
+      rates: current === null ? null : perMillion(current.rates),
+      standard: resolution === null ? null : perMillion(standardRates(resolution.entry)),
+      timeZone,
+      timeline: dayTimeline(schedule, now, timeZone),
+      hasSchedule: schedule !== null,
+      source: typeof resolution?.entry.source === 'string' ? resolution.entry.source : null,
     }
   }
 
@@ -726,6 +738,29 @@ export default class ModelCostService extends Service {
       inherited,
       models: folded.models,
       phase: folded.phase,
+      map: this.mapMeta(),
+    }
+  }
+
+  /**
+   * The tariff a route bills under right now, for a Session with no priced
+   * calls yet: the composer's new-Session tag prices the model it is about to
+   * use rather than a Session total.
+   * @param {object} query - `provider`, `model`, and the viewer's `timeZone`.
+   * @returns {Promise<object>} the route, its tariff description, and price-map metadata.
+   */
+  async quote(query) {
+    const request = query ?? {}
+    await this.loadIndex()
+    await this.loadConfig()
+    const provider = typeof request.provider === 'string' ? request.provider : null
+    const model = typeof request.model === 'string' ? request.model : null
+    const timeZone = typeof request.timeZone === 'string' && request.timeZone !== '' ? request.timeZone : 'UTC'
+    const now = Date.now()
+    return {
+      generatedAt: now,
+      route: { provider, model },
+      phase: this.describeRoute(provider, model, now, timeZone),
       map: this.mapMeta(),
     }
   }
@@ -1053,6 +1088,7 @@ Object.defineProperty(ModelCostService.prototype, REMOTE_METHODS, {
     version: 1,
     methods: Object.freeze([
       Object.freeze({ method: 'session', invocation: Object.freeze({ kind: 'direct' }) }),
+      Object.freeze({ method: 'quote', invocation: Object.freeze({ kind: 'direct' }) }),
       Object.freeze({ method: 'report', invocation: Object.freeze({ kind: 'direct' }) }),
       Object.freeze({ method: 'searchKeys', invocation: Object.freeze({ kind: 'direct' }) }),
       Object.freeze({ method: 'saveMapping', invocation: Object.freeze({ kind: 'direct' }) }),

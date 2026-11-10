@@ -326,6 +326,30 @@ describe('report session cache', () => {
   })
 })
 
+describe('route quote', () => {
+  it('describes a route tariff without reading any log', async () => {
+    freshHome()
+    const corpus = new Corpus()
+    const quote = await corpus.service().quote({
+      provider: 'deepseek', model: 'deepseek-v4-flash', timeZone: 'UTC',
+    })
+    assert.equal(quote.route.provider, 'deepseek')
+    assert.equal(quote.phase.provider, 'deepseek')
+    assert.equal(quote.phase.model, 'deepseek-v4-flash')
+    assert.ok(['peak', 'offpeak', 'flat'].includes(quote.phase.state))
+    assert.notEqual(quote.phase.key, null)
+    assert.notEqual(quote.phase.rates, null)
+    assert.equal(quote.phase.timeZone, 'UTC')
+    assert.ok(quote.map.entries > 0)
+    assert.equal(corpus.readsOf('deepseek'), 0)
+
+    const unpriced = await corpus.service().quote({ provider: 'unknown', model: 'nothing', timeZone: 'UTC' })
+    assert.equal(unpriced.phase.state, 'unresolved')
+    assert.equal(unpriced.phase.rates, null)
+    assert.deepEqual(unpriced.phase.timeline, [])
+  })
+})
+
 describe('report source filter', () => {
   it('drops an excluded provider from the aggregates but still lists it', async () => {
     freshHome()
