@@ -933,6 +933,8 @@ export default class ModelCostService extends Service {
       id,
       label: dimension === 'session' ? (titleOf.get(id) ?? id.slice(0, 8)) : bucket.label,
       cost: bucket.cost,
+      peakCost: bucket.peakCost,
+      offpeakCost: bucket.offpeakCost,
       requests: bucket.requests,
       inputTokens: bucket.inputTokens,
       outputTokens: bucket.outputTokens,

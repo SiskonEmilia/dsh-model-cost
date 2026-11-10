@@ -376,6 +376,11 @@ describe('report source filter', () => {
     // Hiding cost rows must not hide the route that needs a price.
     assert.equal(hidden.routes.length, 2)
     assert.equal(hidden.series.reduce((sum, day) => sum + day.requests, 0), 3)
+    // A group carries its own peak/off-peak split so the share bar can be filled.
+    for (const group of hidden.groups) {
+      assert.ok(group.peakCost >= 0 && group.offpeakCost >= 0)
+      assert.ok(group.peakCost + group.offpeakCost <= group.cost + 1e-9)
+    }
 
     corpus.resetReads()
     const restored = await corpus.service().report({ range: 'all', dimension: 'provider' })
