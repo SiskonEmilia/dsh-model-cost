@@ -137,6 +137,9 @@ window.__ModuleLoader__.load({
       'dialogSpent': 'Spent this Session',
       'dialogTokens': 'Tokens this Session',
       'dialogPeakSplit': 'Peak / off-peak spend',
+      'dialogFork': 'Before the fork (inherited)',
+      'dialogForkCalls': '{count} calls',
+      'dialogForkNote': 'Those calls are billed under the parent Session; totals count them once.',
       'dialogModels': 'Per-model spend',
       'dialogUnpriced': '{count} unpriced calls',
       'dialogEmpty': 'Nothing priced in this Session yet.',
@@ -267,6 +270,9 @@ window.__ModuleLoader__.load({
       'dialogSpent': '本会话花费',
       'dialogTokens': '本会话 tokens',
       'dialogPeakSplit': '峰 / 谷 花费',
+      'dialogFork': 'fork 前（继承）',
+      'dialogForkCalls': '{count} 次调用',
+      'dialogForkNote': '这部分调用记在父会话名下，全局合计只算一次。',
       'dialogModels': '分模型花费',
       'dialogUnpriced': '{count} 次未定价',
       'dialogEmpty': '本会话还没有可计价的花费。',
@@ -566,6 +572,7 @@ window.__ModuleLoader__.load({
 .dsh-mc-panel { position: fixed; z-index: 1100; box-sizing: border-box; width: max-content; min-width: min(300px, calc(100vw - 24px)); max-width: min(430px, calc(100vw - 24px)); padding: 14px 16px; border: 0; border-radius: var(--dsw-radius-lg, 12px); background: var(--dsw-specific-menu, var(--dsw-alias-bg-layer-2)); backdrop-filter: var(--dsw-menu-backdrop-filter, blur(12px)); box-shadow: var(--dsw-elevation-prominent, 0 8px 32px rgba(0,0,0,.28)); font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary); cursor: default; }
 .dsh-mc-panel-title { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 8px; color: var(--dsw-alias-label-primary); font-weight: 500; }
 .dsh-mc-panel-title-label { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.dsh-mc-panel-extra { color: var(--dsw-alias-label-tertiary); font-weight: 400; font-size: 11px; white-space: nowrap; }
 .dsh-mc-panel-rule { margin-bottom: 10px; border-top: .5px solid var(--dsw-alias-border-l2); }
 .dsh-mc-details { display: grid; grid-template-columns: minmax(82px, auto) minmax(0, 1fr); gap: 5px 16px; margin: 0; }
 .dsh-mc-details dt, .dsh-mc-details dd { min-width: 0; margin: 0; }
@@ -923,6 +930,10 @@ window.__ModuleLoader__.load({
      */
     function renderPillPanel(popover, summary, t, openPage) {
       const { totals, phase, models } = summary
+      // A fork carries its parent's spend as context; show it beside the child's
+      // own amount, but it is already billed under the parent.
+      const inherited = summary.inherited ?? null
+      const forkBefore = inherited !== null && inherited.requests > 0 ? inherited : null
       const now = Date.now()
       const rows = []
       if (phase !== null) {
@@ -944,6 +955,11 @@ window.__ModuleLoader__.load({
       rows.push(h('dt', { key: 'tokens' }, t('dialogTokens')),
         h('dd', { key: 'tokens-v' },
           `${formatTokens(totals.inputTokens)} · ${formatTokens(totals.cacheReadTokens)} · ${formatTokens(totals.outputTokens)}`))
+      if (forkBefore !== null) {
+        rows.push(h('dt', { key: 'fork' }, t('dialogFork')),
+          h('dd', { key: 'fork-v' },
+            `${formatCost(forkBefore.cost)} · ${t('dialogForkCalls', { count: forkBefore.requests })}`))
+      }
       if (totals.unpricedRequests > 0) {
         rows.push(h('dt', { key: 'unpriced' }, t('card.unpriced')),
           h('dd', { key: 'unpriced-v' }, t('dialogUnpriced', { count: totals.unpricedRequests })))
@@ -962,7 +978,11 @@ window.__ModuleLoader__.load({
             h('span', { className: 'dsh-mc-panel-title-label' },
               h(PriceTag, { size: 14 }),
               t('dialogTitle')),
-            h('span', null, formatCost(totals.cost))),
+            h('span', null,
+              formatCost(totals.cost),
+              forkBefore === null
+                ? null
+                : h('span', { className: 'dsh-mc-panel-extra' }, ` (+${formatCost(forkBefore.cost)})`))),
           h('div', { className: 'dsh-mc-panel-rule', 'aria-hidden': true }),
           h('dl', { className: 'dsh-mc-details' }, rows),
           phase !== null && phase.hasSchedule && (phase.timeline?.length ?? 0) > 0
@@ -981,6 +1001,9 @@ window.__ModuleLoader__.load({
                   h('span', { className: 'dsh-mc-model-key' }, row.key ?? row.model ?? '—'),
                   h('span', { className: 'dsh-mc-model-cost' }, formatCost(row.cost)))))
             : null,
+          forkBefore === null
+            ? null
+            : h('p', { className: 'dsh-mc-note' }, t('dialogForkNote')),
           h('p', { className: 'dsh-mc-note' },
             h('button', {
               type: 'button',

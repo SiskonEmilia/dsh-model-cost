@@ -262,6 +262,9 @@ export default class ModelCostService extends Service {
       at: Date.now(),
       parsed: events.length,
       items: reusable === undefined ? read.items : [...reusable.items, ...read.items],
+      inheritedItems: reusable === undefined
+        ? read.inheritedItems
+        : [...(reusable.inheritedItems ?? []), ...read.inheritedItems],
       route: read.route,
       lastSeq: read.lastSeq,
     }
@@ -367,12 +370,17 @@ export default class ModelCostService extends Service {
     await this.loadIndex()
     await this.loadConfig()
     const scan = await this.scanSession(String(sessionId))
-    const folded = this.fold(scan.items, Date.now(), typeof timeZone === 'string' && timeZone !== '' ? timeZone : 'UTC')
+    const zone = typeof timeZone === 'string' && timeZone !== '' ? timeZone : 'UTC'
+    const folded = this.fold(scan.items, Date.now(), zone)
+    // A fork copies its parent's calls into this log; they are priced for the
+    // dialog only, never for the global totals.
+    const inherited = scan.inheritedItems.length === 0 ? null : this.fold(scan.inheritedItems, null, zone).totals
     return {
       sessionId: String(sessionId),
       updatedAt: Date.now(),
       hasUsage: folded.totals.requests > 0,
       totals: folded.totals,
+      inherited,
       models: folded.models,
       phase: folded.phase,
       map: this.mapMeta(),

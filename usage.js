@@ -14,17 +14,21 @@ import { count } from './pricing.js'
 /**
  * Read the priced-call inputs out of one Session's raw event log.
  *
- * Positions at or after `from` are read; positions before `inheritedEventCount`
- * still update the route but contribute no call, because a fork copies its
- * parent's prefix into this log. Pass `route` when continuing an earlier read.
+ * Positions at or after `from` are read. Calls before `inheritedEventCount`
+ * belong to the fork parent and land in `inheritedItems`: global totals ignore
+ * them, while the Session dialog shows them as the pre-fork amount. Pass
+ * `route` when continuing an earlier read.
  * @param {readonly object[]} events - the Session's raw log, inherited prefix included.
  * @param {{from?: number, inherited?: number, route?: {provider:string,model:string}|null}} [options] - read window and starting route.
- * @returns {{items: object[], route: {provider:string,model:string}|null, lastSeq: number}} usage rows, the route now in force, and the log's last seq.
+ * @returns {{items: object[], inheritedItems: object[], route: {provider:string,model:string}|null, lastSeq: number}} own usage rows, inherited usage rows, the route now in force, and the log's last seq.
  */
 export function scanUsage(events, options = {}) {
   const from = Number.isInteger(options.from) && options.from > 0 ? options.from : 0
   const inherited = Number.isInteger(options.inherited) && options.inherited > 0 ? options.inherited : 0
   const items = []
+  // Kept apart for the Session dialog, which shows "after the fork (+ before
+  // the fork)"; global totals only ever read `items`.
+  const inheritedItems = []
   let route = options.route ?? null
   for (let position = from; position < events.length; position += 1) {
     const event = events[position]
@@ -39,10 +43,9 @@ export function scanUsage(events, options = {}) {
         route = { provider: context.provider, model: context.model }
       }
     } else if (event.type === 'assistant/message') {
-      if (position < inherited) continue
       const usage = event.data?.usage
       if (typeof usage !== 'object' || usage === null) continue
-      items.push({
+      const row = {
         seq: event.seq,
         time: event.time,
         provider: route?.provider ?? null,
@@ -51,8 +54,10 @@ export function scanUsage(events, options = {}) {
         outputTokens: count(usage.outputTokens),
         cacheReadTokens: count(usage.cacheReadTokens),
         cacheWriteTokens: count(usage.cacheWriteTokens),
-      })
+      }
+      if (position < inherited) inheritedItems.push(row)
+      else items.push(row)
     }
   }
-  return { items, route, lastSeq: events.at(-1)?.seq ?? 0 }
+  return { items, inheritedItems, route, lastSeq: events.at(-1)?.seq ?? 0 }
 }

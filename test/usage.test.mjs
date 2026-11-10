@@ -32,27 +32,34 @@ describe('scanUsage', () => {
     assert.deepEqual(read.items.map(item => `${item.provider}/${item.model}`), ['a/x', 'b/y'])
   })
 
-  it('skips the fork-inherited prefix but keeps its route in force', () => {
+  it('splits the fork-inherited prefix out of the own calls but keeps its route in force', () => {
     const events = [header(0, 'gateway', 'deepseek-v4-flash'), call(1), call(2)]
     const read = scanUsage(events, { inherited: 2 })
     assert.equal(read.items.length, 1)
     assert.equal(read.items[0].seq, 2)
     assert.equal(read.items[0].provider, 'gateway')
+    assert.equal(read.inheritedItems.length, 1)
+    assert.equal(read.inheritedItems[0].seq, 1)
+    assert.equal(read.inheritedItems[0].provider, 'gateway')
   })
 
-  it('counts nothing when the whole log is inherited', () => {
+  it('counts nothing as own when the whole log is inherited', () => {
     const read = scanUsage([header(0, 'gateway', 'm'), call(1)], { inherited: 2 })
     assert.equal(read.items.length, 0)
+    assert.equal(read.inheritedItems.length, 1)
     assert.deepEqual(read.route, { provider: 'gateway', model: 'm' })
   })
 
   it('continues an earlier read without re-reading the prefix', () => {
-    const events = [header(0, 'gateway', 'm'), call(1), call(2)]
-    const first = scanUsage(events, { inherited: 0 })
-    const second = scanUsage(events, { from: 2, inherited: 0, route: first.route })
-    assert.equal(first.items.length, 2)
+    const prefix = [header(0, 'gateway', 'm'), call(1)]
+    const full = [...prefix, call(2)]
+    const first = scanUsage(prefix, { inherited: 2 })
+    const second = scanUsage(full, { from: prefix.length, inherited: 2, route: first.route })
+    assert.equal(first.items.length, 0)
+    assert.equal(first.inheritedItems.length, 1)
     assert.equal(second.items.length, 1)
     assert.equal(second.items[0].seq, 2)
+    assert.equal(second.inheritedItems.length, 0)
     assert.equal(second.route.provider, 'gateway')
   })
 
