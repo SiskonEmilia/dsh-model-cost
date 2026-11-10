@@ -387,6 +387,49 @@ export function dailySeries(days, range) {
   return series
 }
 
+/**
+ * The last calendar day present in a bucket map, or null when it is empty.
+ * @param {Map<string, object>} days - buckets keyed by local date.
+ * @returns {string|null} newest `YYYY-MM-DD`.
+ */
+export function lastDayOf(days) {
+  let last = null
+  for (const date of days.keys()) if (last === null || date > last) last = date
+  return last
+}
+
+/**
+ * Bucket the priced calls of one calendar day into 24 hourly buckets. A single
+ * day is too little for a daily chart, so the page reads it as a timeline.
+ * @param {{time:number,phase:string,cost:number,inputTokens:number,outputTokens:number,cacheReadTokens:number,cacheWriteTokens:number}[]} calls - priced calls of any day.
+ * @param {string} date - local `YYYY-MM-DD` to keep.
+ * @returns {object[]} 24 buckets, hour 0 through 23.
+ */
+export function hourBuckets(calls, date) {
+  const buckets = []
+  for (let hour = 0; hour < 24; hour += 1) {
+    buckets.push({
+      hour,
+      cost: 0, peakCost: 0, offpeakCost: 0, requests: 0,
+      inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0,
+    })
+  }
+  for (const call of calls) {
+    if (dayKey(call.time) !== date) continue
+    const bucket = buckets[new Date(call.time).getHours()]
+    if (bucket === undefined) continue
+    bucket.cost += call.cost
+    if (call.phase === 'peak') bucket.peakCost += call.cost
+    else if (call.phase === 'offpeak') bucket.offpeakCost += call.cost
+    bucket.requests += 1
+    bucket.inputTokens += call.inputTokens
+    bucket.outputTokens += call.outputTokens
+    bucket.cacheReadTokens += call.cacheReadTokens
+    bucket.cacheWriteTokens += call.cacheWriteTokens
+  }
+  return buckets
+}
+
 const zoneFormatters = new Map()
 
 /**

@@ -162,11 +162,12 @@ window.__ModuleLoader__.load({
       'trendDaily': 'daily',
       'trendWeekly': 'weekly',
       'trendMonthly': 'monthly',
+      'trendHourly': 'hourly',
       'trendSpanDays': '{count} days',
       'trendSpanWeeks': '{count} weeks',
       'trendSpanMonths': '{count} months',
       'trendEmpty': 'Nothing recorded in this range yet.',
-      'trendHint': 'Hover a bar for that day’s detail.',
+      'trendHint': 'Hover a bar for its detail.',
       'trendTotal': 'Total {value}',
       'trendAria': 'Usage trend',
       'close': 'Close',
@@ -291,6 +292,7 @@ window.__ModuleLoader__.load({
       'trendDaily': '按天',
       'trendWeekly': '按周',
       'trendMonthly': '按月',
+      'trendHourly': '按小时',
       'trendSpanDays': '{count} 天',
       'trendSpanWeeks': '{count} 周',
       'trendSpanMonths': '{count} 个月',
@@ -1268,7 +1270,7 @@ window.__ModuleLoader__.load({
               totals.unpricedRequests === 0 ? null : h(Card, { label: t('card.unpriced'), value: String(totals.unpricedRequests), note: t('mappingIntro') })),
         report === null || totals === null
           ? null
-          : h(TrendChart, { series: report.series ?? [], t }),
+          : h(TrendChart, { series: report.series ?? [], hours: report.hours ?? null, t }),
         report === null || totals === null
           ? null
           : h('section', { className: 'dsh-mc-section' },
@@ -1386,16 +1388,50 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * Turn the host's 24 hourly buckets into chart points for one day.
+     * @param {{date:string, buckets:object[]}|null} hours - hourly report block.
+     * @returns {{date:string, points:object[]}|null} points, or null when absent.
+     */
+    function buildHourly(hours) {
+      if (hours === null || hours === undefined) return null
+      const date = typeof hours.date === 'string' ? hours.date : ''
+      const buckets = Array.isArray(hours.buckets) ? hours.buckets : []
+      if (date === '' || buckets.length === 0) return null
+      const points = buckets.map((bucket, index) => {
+        const hour = typeof bucket?.hour === 'number' ? bucket.hour : index
+        const clock = `${String(hour).padStart(2, '0')}:00`
+        return {
+          id: `${date}T${clock}`,
+          hour,
+          from: `${date} ${clock}`,
+          to: `${date} ${clock}`,
+          cost: reportNumber(bucket.cost),
+          peakCost: reportNumber(bucket.peakCost),
+          offpeakCost: reportNumber(bucket.offpeakCost),
+          requests: reportNumber(bucket.requests),
+          tokens: reportNumber(bucket.inputTokens) + reportNumber(bucket.outputTokens)
+            + reportNumber(bucket.cacheReadTokens) + reportNumber(bucket.cacheWriteTokens),
+        }
+      })
+      return { date, points: points.sort((left, right) => left.hour - right.hour) }
+    }
+
+    /**
      * Usage and spend over time: one bar per day (weeks or months on long
      * ranges), stacked by tariff when showing money, with a metric switch and
      * per-bucket detail on hover.
      * @param {{series: object[], t: Function}} props - the report series and translator.
      * @returns {object} section element.
      */
-    function TrendChart({ series, t }) {
+    function TrendChart({ series, hours, t }) {
       const [metric, setMetric] = useState('cost')
       const [hover, setHover] = useState(-1)
-      const view = useMemo(() => buildTrend(series), [series])
+      const daily = useMemo(() => buildTrend(series), [series])
+      const hourly = useMemo(() => buildHourly(hours), [hours])
+      // One bar cannot describe a single day, so that day is read hour by hour.
+      const view = useMemo(() => (hourly !== null && daily.points.length === 1
+        ? { unit: 'hour', date: hourly.date, points: hourly.points }
+        : daily), [daily, hourly])
       const total = useMemo(() => view.points.reduce((sum, point) => (
         sum + (metric === 'cost' ? point.cost : metric === 'requests' ? point.requests : point.tokens)
       ), 0), [view, metric])
@@ -1403,6 +1439,12 @@ window.__ModuleLoader__.load({
         metric === 'cost' ? point.cost : metric === 'requests' ? point.requests : point.tokens), 0), [view, metric])
       const ticks = useMemo(() => {
         const shown = new Set()
+        if (view.unit === 'hour') {
+          // A full day is fixed width: label every four hours and the last one.
+          for (let hour = 0; hour <= 20; hour += 4) shown.add(hour)
+          shown.add(23)
+          return shown
+        }
         const step = Math.max(1, Math.ceil(view.points.length / 9))
         for (let index = view.points.length - 1; index >= 0; index -= step) shown.add(index)
         return shown
@@ -1419,10 +1461,16 @@ window.__ModuleLoader__.load({
         if (max <= 0) return 0
         return Math.max(amount > 0 ? 2 : 0, amount / max * 100)
       }
-      const labelOf = point => (view.unit === 'month' ? point.id.slice(2) : point.id.slice(5))
-      const unitText = t(view.unit === 'day' ? 'trendDaily' : view.unit === 'week' ? 'trendWeekly' : 'trendMonthly')
-      const spanText = t(view.unit === 'day' ? 'trendSpanDays' : view.unit === 'week' ? 'trendSpanWeeks' : 'trendSpanMonths',
-        { count: view.points.length })
+      const labelOf = point => {
+        if (view.unit === 'hour') return String(point.hour).padStart(2, '0')
+        return view.unit === 'month' ? point.id.slice(2) : point.id.slice(5)
+      }
+      const unitText = t(view.unit === 'hour' ? 'trendHourly'
+        : view.unit === 'day' ? 'trendDaily' : view.unit === 'week' ? 'trendWeekly' : 'trendMonthly')
+      const spanText = view.unit === 'hour'
+        ? view.date.slice(5)
+        : t(view.unit === 'day' ? 'trendSpanDays' : view.unit === 'week' ? 'trendSpanWeeks' : 'trendSpanMonths',
+          { count: view.points.length })
       const detailOf = point => {
         const when = point.from === point.to ? point.from : `${point.from} – ${point.to}`
         const parts = [

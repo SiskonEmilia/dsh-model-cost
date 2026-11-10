@@ -3,8 +3,9 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import {
-  dailySeries, dayKey, dayKeysBetween, dayTimeline, indexCostMap, isOffPeak, nextPhaseChange, normalizeOffPeak, parseWeekdays,
-  parseWindow, perMillion, phaseAt, priceUsage, rangeWindow, rankCandidates, resolveKey, splitKey, standardRates,
+  dailySeries, dayKey, dayKeysBetween, dayTimeline, hourBuckets, indexCostMap, isOffPeak, lastDayOf, nextPhaseChange,
+  normalizeOffPeak, parseWeekdays, parseWindow, perMillion, phaseAt, priceUsage, rangeWindow, rankCandidates, resolveKey,
+  splitKey, standardRates,
 } from '../pricing.js'
 
 /** DeepSeek's shipped schedule: weekdays 00-01, 04-06, and 10-24, plus all weekend. */
@@ -421,5 +422,61 @@ describe('dailySeries', () => {
     const series = dailySeries(new Map(), { id: 'all', start: 0, end: Date.now() })
     assert.equal(series.length, 1)
     assert.equal(series[0].cost, 0)
+  })
+})
+
+describe('lastDayOf', () => {
+  it('answers the newest date key', () => {
+    assert.equal(lastDayOf(new Map([['2026-10-31', {}], ['2026-11-09', {}], ['2026-11-01', {}]])), '2026-11-09')
+  })
+
+  it('answers null for an empty map', () => {
+    assert.equal(lastDayOf(new Map()), null)
+  })
+})
+
+describe('hourBuckets', () => {
+  /** One priced call at a local wall-clock time. */
+  const call = (date, hour, minute, cost, phase, tokens = 100) => ({
+    time: new Date(2026, 10, date, hour, minute).getTime(),
+    cost, phase,
+    inputTokens: tokens, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0,
+  })
+
+  it('returns 24 buckets in hour order', () => {
+    const buckets = hourBuckets([], '2026-11-10')
+    assert.equal(buckets.length, 24)
+    assert.deepEqual(buckets.map(bucket => bucket.hour), Array.from({ length: 24 }, (_value, hour) => hour))
+    assert.equal(buckets.every(bucket => bucket.cost === 0 && bucket.requests === 0), true)
+  })
+
+  it('places each call in its own hour and splits the tariff', () => {
+    const buckets = hourBuckets([
+      call(10, 9, 5, 0.2, 'offpeak'),
+      call(10, 9, 40, 0.1, 'offpeak'),
+      call(10, 14, 0, 0.5, 'peak'),
+      call(10, 20, 30, 0.3, 'flat'),
+    ], '2026-11-10')
+    const close = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-9, `${actual} != ${expected}`)
+    assert.equal(buckets[9].requests, 2)
+    close(buckets[9].cost, 0.3)
+    close(buckets[9].offpeakCost, 0.3)
+    assert.equal(buckets[14].cost, 0.5)
+    assert.equal(buckets[14].peakCost, 0.5)
+    assert.equal(buckets[20].cost, 0.3)
+    assert.equal(buckets[20].peakCost, 0)
+    assert.equal(buckets[20].offpeakCost, 0)
+    const total = buckets.reduce((sum, bucket) => sum + bucket.cost, 0)
+    close(total, 1.1)
+  })
+
+  it('ignores calls from another day', () => {
+    const buckets = hourBuckets([call(9, 23, 0, 9, 'peak')], '2026-11-10')
+    assert.equal(buckets.reduce((sum, bucket) => sum + bucket.requests, 0), 0)
+  })
+
+  it('keeps the token split per hour', () => {
+    const buckets = hourBuckets([call(10, 8, 0, 0.01, 'offpeak', 1234)], '2026-11-10')
+    assert.equal(buckets[8].inputTokens, 1234)
   })
 })

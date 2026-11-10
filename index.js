@@ -21,7 +21,7 @@ import { homedir } from 'node:os'
 import { Service } from '@deepseek-ai/cordis'
 import { RemoteError, bindTypertRemote } from '@deepseek-ai/dsh-typert-protocol'
 import {
-  count, dailySeries, dayKey, dayTimeline, indexCostMap, perMillion, phaseAt, priceUsage,
+  count, dailySeries, dayKey, dayTimeline, hourBuckets, indexCostMap, lastDayOf, perMillion, phaseAt, priceUsage,
   rangeWindow, resolveKey, standardRates,
 } from './pricing.js'
 
@@ -450,6 +450,8 @@ export default class ModelCostService extends Service {
     const routes = new Map()
     const days = new Map()
     const sessions = []
+    /** Every in-range call, priced once: the hourly view reuses these. */
+    const calls = []
 
     for (const { record, scan } of scanned) {
       const sessionId = String(record.header.id)
@@ -474,6 +476,15 @@ export default class ModelCostService extends Service {
 
         accumulate(groups, groupKey(dimension, item, priced, resolution, sessionId), priced, item)
         accumulate(days, dayKey(item.time), priced, item)
+        calls.push({
+          time: item.time,
+          phase: priced.phase,
+          cost: priced.cost,
+          inputTokens: item.inputTokens,
+          outputTokens: item.outputTokens,
+          cacheReadTokens: item.cacheReadTokens,
+          cacheWriteTokens: item.cacheWriteTokens,
+        })
 
         const routeId = `${item.provider ?? ''}\u0000${item.model ?? ''}`
         let route = routes.get(routeId)
@@ -530,6 +541,9 @@ export default class ModelCostService extends Service {
     }))
     list.sort((left, right) => right.cost - left.cost || right.requests - left.requests)
     const billedInput = totals.inputTokens + totals.cacheReadTokens + totals.cacheWriteTokens
+    // A one-day range has nothing to spread across dates; the newest day with
+    // usage is offered as an hourly timeline instead.
+    const newestDay = lastDayOf(days)
     return {
       generatedAt: Date.now(),
       range,
@@ -542,6 +556,7 @@ export default class ModelCostService extends Service {
       },
       groups: list.slice(0, positive(request.limit, 25)),
       series: dailySeries(days, range),
+      hours: newestDay === null ? null : { date: newestDay, buckets: hourBuckets(calls, newestDay) },
       routes: [...routes.values()].sort((left, right) => right.cost - left.cost || right.requests - left.requests),
       scanned: { sessions: scanned.length, available: records.length, capped: records.length > capped.length },
       rules: this.config.rules,
