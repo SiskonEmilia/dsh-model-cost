@@ -747,7 +747,11 @@ export default class ModelCostService extends Service {
 
   /**
    * Scan every Session in the requested range and group the priced calls.
-   * @param {object} query - `range`, `dimension`, `limit`, and an optional `force` rescan.
+   *
+   * `exclude` names providers to leave out of the aggregates. The switch that
+   * turns one off needs to state what it is hiding, so the per-source tallies
+   * are collected before the filter and returned whether or not they count.
+   * @param {object} query - `range`, `dimension`, `limit`, an optional `force` rescan, and `exclude` (provider ids to leave out).
    * @returns {Promise<object>} report.
    */
   async report(query) {
@@ -761,6 +765,9 @@ export default class ModelCostService extends Service {
     }
     const range = rangeWindow(typeof request.range === 'string' ? request.range : 'all', Date.now())
     const dimension = typeof request.dimension === 'string' ? request.dimension : 'model'
+    const excluded = new Set((Array.isArray(request.exclude) ? request.exclude : [])
+      .filter(provider => typeof provider === 'string' && provider !== '')
+      .slice(0, 64))
     const records = await engine.listSessions()
     const revisions = await this.revisionMap()
     const capped = records.slice(0, MAX_SESSIONS_SCANNED)
@@ -794,6 +801,7 @@ export default class ModelCostService extends Service {
     }
     const groups = new Map()
     const routes = new Map()
+    const sources = new Map()
     const days = new Map()
     const sessions = []
     /** Every in-range call, priced once: the hourly view reuses these. */
@@ -807,6 +815,37 @@ export default class ModelCostService extends Service {
         if (item.time < range.start || item.time > range.end) continue
         const priced = this.priceRow(item, signature)
         const resolution = this.resolve(item.provider, item.model)
+        const sourceId = item.provider ?? '—'
+        let source = sources.get(sourceId)
+        if (source === undefined) {
+          source = { provider: sourceId, requests: 0, cost: 0 }
+          sources.set(sourceId, source)
+        }
+        source.requests += 1
+        source.cost += priced.cost
+        // The price-mapping editor must keep listing a route the reader has
+        // hidden, so routes and sources are tallied before the filter.
+        const routeId = `${item.provider ?? ''}\u0000${item.model ?? ''}`
+        let route = routes.get(routeId)
+        if (route === undefined) {
+          route = {
+            provider: item.provider,
+            model: item.model,
+            key: resolution?.key ?? null,
+            via: resolution?.via ?? null,
+            ambiguous: resolution?.ambiguous ?? false,
+            resolved: resolution !== null,
+            candidates: resolution?.candidates ?? null,
+            requests: 0, cost: 0, inputTokens: 0, outputTokens: 0,
+          }
+          routes.set(routeId, route)
+        }
+        route.requests += 1
+        route.cost += priced.cost
+        route.inputTokens += item.inputTokens
+        route.outputTokens += item.outputTokens
+        if (excluded.has(sourceId)) continue
+
         sessionCost += priced.cost
         sessionRequests += 1
         totals.cost += priced.cost
@@ -831,26 +870,6 @@ export default class ModelCostService extends Service {
           cacheReadTokens: item.cacheReadTokens,
           cacheWriteTokens: item.cacheWriteTokens,
         })
-
-        const routeId = `${item.provider ?? ''}\u0000${item.model ?? ''}`
-        let route = routes.get(routeId)
-        if (route === undefined) {
-          route = {
-            provider: item.provider,
-            model: item.model,
-            key: resolution?.key ?? null,
-            via: resolution?.via ?? null,
-            ambiguous: resolution?.ambiguous ?? false,
-            resolved: resolution !== null,
-            candidates: resolution?.candidates ?? null,
-            requests: 0, cost: 0, inputTokens: 0, outputTokens: 0,
-          }
-          routes.set(routeId, route)
-        }
-        route.requests += 1
-        route.cost += priced.cost
-        route.inputTokens += item.inputTokens
-        route.outputTokens += item.outputTokens
       }
       if (sessionRequests > 0) {
         totals.sessionsWithUsage += 1
@@ -905,6 +924,7 @@ export default class ModelCostService extends Service {
       groups: list.slice(0, positive(request.limit, 25)),
       series: dailySeries(days, range),
       hours: newestDay === null ? null : { date: newestDay, buckets: hourBuckets(calls, newestDay) },
+      sources: [...sources.values()].sort((left, right) => right.cost - left.cost || right.requests - left.requests),
       routes: [...routes.values()].sort((left, right) => right.cost - left.cost || right.requests - left.requests),
       scanned: {
         sessions: scanned.length,

@@ -14,12 +14,12 @@ const NOW = Date.now()
 const USAGE = { inputTokens: 1_000_000, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }
 
 /** One Session log: a pricing route followed by billed assistant messages. */
-function eventsFor(calls) {
+function eventsFor(calls, route = { provider: 'deepseek', model: 'deepseek-v4-flash' }) {
   const events = [{
     type: 'request/header',
     seq: 0,
     time: NOW - 600_000,
-    data: { header: { config: { provider: 'deepseek', model: 'deepseek-v4-flash' } } },
+    data: { header: { config: { provider: route.provider, model: route.model } } },
   }]
   for (let index = 0; index < calls; index += 1) {
     events.push({
@@ -48,13 +48,13 @@ class Corpus {
    * Add one stored Session.
    * @param {string} id - Session id.
    * @param {number} calls - billed assistant messages.
-   * @param {{inherited?: number, revision?: string}} [options] - fork cut and starting revision.
+   * @param {{inherited?: number, revision?: string, route?: {provider:string,model:string}}} [options] - fork cut, starting revision, and the route every call bills under.
    * @returns {Corpus} this corpus.
    */
   add(id, calls, options = {}) {
     this.sessions.set(id, {
       id,
-      events: eventsFor(calls),
+      events: eventsFor(calls, options.route),
       revision: options.revision ?? 'r1',
       inherited: options.inherited ?? 0,
     })
@@ -323,5 +323,39 @@ describe('report session cache', () => {
     const dialog = await corpus.service().session('fork', 'UTC')
     assert.equal(dialog.totals.requests, 2)
     assert.equal(dialog.inherited.requests, 1)
+  })
+})
+
+describe('report source filter', () => {
+  it('drops an excluded provider from the aggregates but still lists it', async () => {
+    freshHome()
+    const corpus = new Corpus()
+      .add('a', 3)
+      .add('b', 2, { route: { provider: 'zai-coding-cn', model: 'glm-5.3' } })
+    const service = corpus.service()
+    const all = await service.report({ range: 'all', dimension: 'provider' })
+    assert.equal(all.totals.requests, 5)
+    assert.deepEqual(all.sources.map(source => source.provider).sort(), ['deepseek', 'zai-coding-cn'])
+    // Without a filter the per-source tallies are the totals, split by provider.
+    assert.equal(all.sources.reduce((sum, source) => sum + source.requests, 0), all.totals.requests)
+    assert.ok(Math.abs(all.sources.reduce((sum, source) => sum + source.cost, 0) - all.totals.cost) < 1e-9)
+
+    const hidden = await service.report({ range: 'all', dimension: 'provider', exclude: ['zai-coding-cn'] })
+    assert.equal(hidden.totals.requests, 3)
+    assert.equal(hidden.totals.sessionsWithUsage, 1)
+    assert.deepEqual(hidden.groups.map(group => group.id), ['deepseek'])
+    // The switch must be able to show what it is hiding, so the tally is
+    // collected before the filter and survives it.
+    const zai = hidden.sources.find(source => source.provider === 'zai-coding-cn')
+    assert.equal(zai.requests, 2)
+    assert.ok(zai.cost > 0)
+    // Hiding cost rows must not hide the route that needs a price.
+    assert.equal(hidden.routes.length, 2)
+    assert.equal(hidden.series.reduce((sum, day) => sum + day.requests, 0), 3)
+
+    corpus.resetReads()
+    const restored = await corpus.service().report({ range: 'all', dimension: 'provider' })
+    assert.equal(restored.totals.requests, 5)
+    assert.equal(corpus.readsOf('a') + corpus.readsOf('b'), 0)
   })
 })
