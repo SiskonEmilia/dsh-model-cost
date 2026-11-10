@@ -1,5 +1,8 @@
 # dsh-model-cost
 
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![DeepSeek Harness plugin](https://img.shields.io/badge/DeepSeek%20Harness-plugin-4176e6)
+
 DeepSeek Harness 的模型花费统计插件。它把会话日志里每次模型调用的 usage
 （未缓存输入 / 缓存读 / 缓存写 / 输出）按 [LiteLLM Model Cost Map](https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json)
 折算成美元，并按 LiteLLM 的 `off_peak_pricing` 规则判断这次调用落在**峰时**还是**谷时**——
@@ -55,8 +58,8 @@ DeepSeek Harness 的模型花费统计插件。它把会话日志里每次模型
 - **概览卡片**：总成本、总 tokens、请求数、缓存命中率、峰/谷占比、未定价调用数。
 - **用量走势图**：按天一根柱子的花费 / Tokens / 请求走势，可在三种指标间切换。
   花费模式下柱子按峰（黄）/ 谷（绿）/ 无峰谷（DeepSeek 蓝）堆叠；**Tokens 模式**把
-  缓存读、缓存写、未缓存输入、输出拆成四段，用四档深浅不同的蓝区分，图例、悬停卡片
-  和柱子使用同一组颜色。没有记录的日子画成空位，时间轴按真实日期连续铺开，不会把空档挤掉。
+  缓存读、缓存写、未缓存输入、输出拆成四段，用四档蓝色区分（缓存读最浅、输出最深），
+  图例、悬停卡片和柱子使用同一组颜色。没有记录的日子画成空位，时间轴按真实日期连续铺开，不会把空档挤掉。
   时间跨度长时自动汇总：超过 120 天按周、超过 540 天按月，标题会注明当前口径。
   **范围内只有一天数据时（例如「今天」）自动改成按小时展开**：24 根柱子、刻度为 00/04/08/12/16/20/23。
   悬停任意柱子，一个跟随指针的卡片给出那个时段（天/周/月/小时）的日期、峰/谷花费拆分、
@@ -72,9 +75,11 @@ DeepSeek Harness 的模型花费统计插件。它把会话日志里每次模型
 
 ## 安装
 
-需要已安装 DeepSeek Harness Desktop。在插件目录里运行：
+需要已安装 DeepSeek Harness Desktop。
 
 ```powershell
+git clone https://github.com/SiskonEmilia/dsh-model-cost
+cd dsh-model-cost
 pwsh -File .\install-desktop.ps1
 ```
 
@@ -82,6 +87,12 @@ pwsh -File .\install-desktop.ps1
 把插件作为 bundle 写进 `~/.dsh/profiles/desktop`。装完需要重启 Desktop 才会加载 Host 半边；
 已在运行时改过 `index.js`（Host 代码）也一样——重启 Desktop，或在 Settings → Plugins 里把
 `dsh-model-cost` 关掉再打开，让 Cordis 重新 import Host 模块。改 `client.js` 只需刷新页面。
+
+## 数据与隐私
+
+- 只读本地会话日志，取其中每次调用的 provider / model、usage 和完成时间，不读取消息正文。
+- 统计缓存与映射规则只写本地 `$DSH_HOME/model-cost/`，不上传。
+- 唯一的外网请求是点「更新价目表」时拉取 LiteLLM 的公开 JSON；内置快照已随插件分发。
 
 ## 计价规则
 
