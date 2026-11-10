@@ -39,6 +39,13 @@ window.__ModuleLoader__.load({
     const MEASURE_STYLE = { visibility: 'hidden', left: 0, top: 0 }
     /** Fallback detail page when a cost-map entry carries no provider price source. */
     const COST_MAP_BROWSE_URL = 'https://models.litellm.ai/'
+    /** Full locale keys for the rate names; the tag itself abbreviates them. */
+    const RATE_LABEL = Object.freeze({
+      input: 'dialogRateInput',
+      output: 'dialogRateOutput',
+      cacheRead: 'dialogRateCache',
+      cacheWrite: 'dialogRateWrite',
+    })
     /** Browser-local memory of the sources the reader hid from the statistics. */
     const HIDDEN_SOURCES_KEY = 'dsh-model-cost:hidden-sources'
 
@@ -168,6 +175,10 @@ window.__ModuleLoader__.load({
       'dialogRateOutput': 'Output',
       'dialogRateCache': 'Cache read',
       'dialogRateWrite': 'Cache write',
+      'rateShort.input': 'in',
+      'rateShort.output': 'out',
+      'rateShort.cacheRead': 'cache read',
+      'rateShort.cacheWrite': 'cache write',
       'dialogSpent': 'Spent this Session',
       'dialogTokens': 'Tokens this Session',
       'dialogPeakSplit': 'Peak / off-peak spend',
@@ -304,6 +315,10 @@ window.__ModuleLoader__.load({
       'dialogRateOutput': '输出',
       'dialogRateCache': '缓存读',
       'dialogRateWrite': '缓存写',
+      'rateShort.input': '入',
+      'rateShort.output': '出',
+      'rateShort.cacheRead': '缓读',
+      'rateShort.cacheWrite': '缓写',
       'dialogSpent': '本会话花费',
       'dialogTokens': '本会话 tokens',
       'dialogPeakSplit': '峰 / 谷 花费',
@@ -1236,26 +1251,25 @@ window.__ModuleLoader__.load({
       const phaseLabel = t(`phaseShort.${tariffState}`)
       const rates = phase.rates
       // Cache prices are often absent; a zero would be noise in the tag, so
-      // those entries drop out (the panel still lists every rate).
-      const rateItems = []
-      if (rates !== null) {
-        rateItems.push(
-          `${t('dialogRateInput')} ${formatRate(rates.input)}`,
-          `${t('dialogRateOutput')} ${formatRate(rates.output)}`,
-        )
-        if (rates.cacheRead > 0) rateItems.push(`${t('dialogRateCache')} ${formatRate(rates.cacheRead)}`)
-        if (rates.cacheWrite > 0) rateItems.push(`${t('dialogRateWrite')} ${formatRate(rates.cacheWrite)}`)
-      }
+      // those entries drop out (the panel still lists every rate). Cache comes
+      // first because it usually decides the bill of a long conversation.
+      const entries = rates === null ? [] : [
+        ['cacheRead', rates.cacheRead, rates.cacheRead > 0],
+        ['cacheWrite', rates.cacheWrite, rates.cacheWrite > 0],
+        ['input', rates.input, true],
+        ['output', rates.output, true],
+      ].filter(entry => entry[2])
       const label = rates === null
         ? phaseLabel
         : h(React.Fragment, null,
-            rateItems.join(' · '),
+            entries.map(([key, value]) => `${t(`rateShort.${key}`)} ${formatRate(value)}`).join(' · '),
             h('span', { className: 'dsh-mc-sep', 'aria-hidden': true }, '·'),
             phaseLabel,
           )
+      // The tag abbreviates; the accessible name spells the same four entries out.
       const aria = rates === null
         ? `${t('tariffTitle')} · ${t(`phase.${tariffState}`)}`
-        : `${t('tariffTitle')} · ${rateItems.join(' · ')} · ${t(`phase.${tariffState}`)}`
+        : `${t('tariffTitle')} · ${entries.map(([key, value]) => `${t(RATE_LABEL[key])} ${formatRate(value)}`).join(' · ')} · ${t(`phase.${tariffState}`)}`
 
       return h('span', { ref: popover.rootRef, className: 'dsh-mc-anchor' },
         h('button', {
