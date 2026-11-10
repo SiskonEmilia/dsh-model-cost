@@ -716,10 +716,11 @@ window.__ModuleLoader__.load({
 .dsh-mc-table tr:hover td { background: var(--dsw-alias-interactive-bg-hover); }
 .dsh-mc-name { color: var(--dsw-alias-label-primary); }
 .dsh-mc-bar { position: relative; height: 4px; min-width: 60px; border-radius: 2px; background: var(--dsw-alias-bg-layer-3, rgba(127,127,127,.16)); overflow: hidden; }
-.dsh-mc-bar > span { position: absolute; inset: 0 auto 0 0; border-radius: 2px; background: var(--dsw-alias-brand-primary); }
+.dsh-mc-bar-fill { position: absolute; inset: 0 auto 0 0; display: flex; min-width: 1px; overflow: hidden; border-radius: 2px; }
+.dsh-mc-bar-seg { flex: 1 1 0; min-width: 0; }
 .dsh-mc-trend { display: flex; flex-direction: column; gap: 6px; padding: 14px; }
 .dsh-mc-trend-controls { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
-.dsh-mc-trend-legend { display: inline-flex; align-items: center; gap: 5px; color: var(--dsw-alias-label-tertiary); font-size: 11px; }
+.dsh-mc-trend-legend { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 5px; color: var(--dsw-alias-label-tertiary); font-size: 11px; }
 .dsh-mc-trend-legend-item { display: inline-flex; align-items: center; gap: 5px; }
 .dsh-mc-trend-swatch { display: inline-block; width: 8px; height: 8px; border-radius: 2px; }
 .dsh-mc-trend-frame { display: flex; gap: 8px; }
@@ -735,9 +736,13 @@ window.__ModuleLoader__.load({
 .dsh-mc-trend-col:hover, .dsh-mc-trend-col:focus-visible { background: var(--dsw-alias-interactive-bg-hover); outline: none; }
 .dsh-mc-trend-bar { box-sizing: border-box; display: flex; flex-direction: column; width: 70%; min-width: 2px; max-width: var(--dsh-mc-bar-max, 96px); min-height: 2px; overflow: hidden; border-radius: var(--dsh-mc-bar-radius, 3px) var(--dsh-mc-bar-radius, 3px) 0 0; background: var(--dsw-alias-bg-layer-3, rgba(127,127,127,.14)); }
 .dsh-mc-trend-seg { flex: 1 1 0; min-height: 0; }
-.dsh-mc-trend-solid { background: var(--dsw-alias-brand-primary); }
+.dsh-mc-trend-solid { background: var(--dsw-static-deepseek-450, #5686fe); }
 .dsh-mc-trend-peak { background: var(--dsw-alias-state-warn-primary); }
 .dsh-mc-trend-offpeak { background: var(--dsw-alias-state-success-primary); }
+.dsh-mc-trend-cacheread { background: var(--dsw-static-deepseek-600, #4868b2); }
+.dsh-mc-trend-cachewrite { background: var(--dsw-static-deepseek-500, #4176e6); }
+.dsh-mc-trend-input { background: var(--dsw-static-deepseek-450, #5686fe); }
+.dsh-mc-trend-output { background: var(--dsw-static-deepseek-400, #7aaaff); }
 .dsh-mc-trend-xaxis { display: flex; margin-left: 56px; color: var(--dsw-alias-label-tertiary); font-size: 9px; line-height: 12px; }
 .dsh-mc-trend-tick { flex: 1 1 0; min-width: 0; text-align: center; white-space: nowrap; overflow: visible; }
 .dsh-mc-section.dsh-mc-trend-section { overflow: visible; }
@@ -1187,10 +1192,10 @@ window.__ModuleLoader__.load({
               h('div', null, `${t('dialogRateCache')} ${formatRate(phase.rates.cacheRead)} · ${t('dialogRateWrite')} ${formatRate(phase.rates.cacheWrite)}`)))
         }
       }
-      rows.push(h('dt', { key: 'requests' }, t('card.requests')), h('dd', { key: 'requests-v' }, String(totals.requests)))
       rows.push(h('dt', { key: 'tokens' }, t('dialogTokens')),
         h('dd', { key: 'tokens-v' },
           `${formatTokens(totals.inputTokens)} · ${formatTokens(totals.cacheReadTokens)} · ${formatTokens(totals.outputTokens)}`))
+      rows.push(h('dt', { key: 'requests' }, t('card.requests')), h('dd', { key: 'requests-v' }, String(totals.requests)))
       if (totals.unpricedRequests > 0) {
         rows.push(h('dt', { key: 'unpriced' }, t('card.unpriced')),
           h('dd', { key: 'unpriced-v' }, t('dialogUnpriced', { count: totals.unpricedRequests })))
@@ -1616,6 +1621,8 @@ window.__ModuleLoader__.load({
       // it is the only source the current range recorded.
       const showSources = sources.length > 1 || (sources.length > 0 && hiddenSources.length > 0)
       const maxCost = report === null ? 0 : Math.max(0, ...report.groups.map(group => group.cost))
+      // The share bar splits one group's spend the same way the trend bars do.
+      const groupShare = (group, value) => (group.cost > 0 ? Math.max(0, value ?? 0) / group.cost : 0)
 
       return h('div', { className: 'dsh-mc-page' },
         h('header', { className: 'dsh-mc-head' },
@@ -1685,12 +1692,12 @@ window.__ModuleLoader__.load({
           ? (status === 'loading' ? h('div', { className: 'dsh-mc-loading' }, t('loading')) : null)
           : h('section', { className: 'dsh-mc-cards' },
               h(Card, { label: t('card.cost'), value: formatCost(totals.cost), note: t('sessionsWithUsage', { count: totals.sessionsWithUsage }) }),
-              h(Card, { label: t('card.requests'), value: String(totals.requests), note: t('sessionsCount', { count: totals.sessions }) }),
               h(Card, {
                 label: t('card.tokens'),
                 value: formatTokens(totals.inputTokens + totals.cacheReadTokens + totals.cacheWriteTokens + totals.outputTokens),
                 note: `${t('items.input')} ${formatTokens(totals.inputTokens)} · ${t('items.output')} ${formatTokens(totals.outputTokens)}`,
               }),
+              h(Card, { label: t('card.requests'), value: String(totals.requests), note: t('sessionsCount', { count: totals.sessions }) }),
               h(Card, { label: t('card.cacheHit'), value: formatPercent(totals.cacheHitRatio), note: `${t('items.cacheRead')} ${formatTokens(totals.cacheReadTokens)}` }),
               h(Card, {
                 label: t('card.phase'),
@@ -1725,7 +1732,10 @@ window.__ModuleLoader__.load({
                       h('td', { className: 'dsh-mc-name' }, group.label),
                       h('td', { className: 'dsh-mc-num' }, formatCost(group.cost)),
                       h('td', null, h('div', { className: 'dsh-mc-bar' },
-                        h('span', { style: { width: `${maxCost === 0 ? 0 : Math.max(1, (group.cost / maxCost) * 100)}%` } }))),
+                        h('span', { className: 'dsh-mc-bar-fill', style: { width: `${maxCost === 0 ? 0 : Math.max(1, (group.cost / maxCost) * 100)}%` } },
+                          h('span', { className: 'dsh-mc-bar-seg dsh-mc-trend-offpeak', style: { flexGrow: groupShare(group, group.offpeakCost) } }),
+                          h('span', { className: 'dsh-mc-bar-seg dsh-mc-trend-peak', style: { flexGrow: groupShare(group, group.peakCost) } }),
+                          h('span', { className: 'dsh-mc-bar-seg dsh-mc-trend-solid', style: { flexGrow: groupShare(group, group.cost - (group.peakCost ?? 0) - (group.offpeakCost ?? 0)) } })))),
                       h('td', { className: 'dsh-mc-num' }, String(group.requests)),
                       h('td', { className: 'dsh-mc-num' }, formatTokens(group.inputTokens)),
                       h('td', { className: 'dsh-mc-num' }, formatTokens(group.cacheReadTokens)),
@@ -1804,7 +1814,10 @@ window.__ModuleLoader__.load({
         const id = unit === 'day' ? day.date : unit === 'week' ? mondayOf(day.date) : day.date.slice(0, 7)
         let point = buckets.get(id)
         if (point === undefined) {
-          point = { id, from: day.date, to: day.date, cost: 0, peakCost: 0, offpeakCost: 0, requests: 0, tokens: 0 }
+          point = {
+            id, from: day.date, to: day.date, cost: 0, peakCost: 0, offpeakCost: 0, requests: 0, tokens: 0,
+            inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0,
+          }
           buckets.set(id, point)
         }
         if (day.date < point.from) point.from = day.date
@@ -1813,6 +1826,10 @@ window.__ModuleLoader__.load({
         point.peakCost += reportNumber(day.peakCost)
         point.offpeakCost += reportNumber(day.offpeakCost)
         point.requests += reportNumber(day.requests)
+        point.inputTokens += reportNumber(day.inputTokens)
+        point.outputTokens += reportNumber(day.outputTokens)
+        point.cacheReadTokens += reportNumber(day.cacheReadTokens)
+        point.cacheWriteTokens += reportNumber(day.cacheWriteTokens)
         point.tokens += reportNumber(day.inputTokens) + reportNumber(day.outputTokens)
           + reportNumber(day.cacheReadTokens) + reportNumber(day.cacheWriteTokens)
       }
@@ -1841,6 +1858,10 @@ window.__ModuleLoader__.load({
           peakCost: reportNumber(bucket.peakCost),
           offpeakCost: reportNumber(bucket.offpeakCost),
           requests: reportNumber(bucket.requests),
+          inputTokens: reportNumber(bucket.inputTokens),
+          outputTokens: reportNumber(bucket.outputTokens),
+          cacheReadTokens: reportNumber(bucket.cacheReadTokens),
+          cacheWriteTokens: reportNumber(bucket.cacheWriteTokens),
           tokens: reportNumber(bucket.inputTokens) + reportNumber(bucket.outputTokens)
             + reportNumber(bucket.cacheReadTokens) + reportNumber(bucket.cacheWriteTokens),
         }
@@ -1896,6 +1917,8 @@ window.__ModuleLoader__.load({
       // cost, so they always sum to the full bar. Absolute amounts here would
       // leave the rest of the bar on its track colour.
       const shareOf = (point, value) => (point.cost > 0 ? value / point.cost : 0)
+      /** The same split for the token bars: four buckets of one bucket's total. */
+      const shareOfTokens = (point, value) => (point.tokens > 0 ? value / point.tokens : 0)
       const hasFlat = metric === 'cost' && view.points.some(point => flatOf(point) > 0)
       const heightOf = point => {
         const amount = valueOf(point)
@@ -1917,8 +1940,8 @@ window.__ModuleLoader__.load({
         const parts = [
           when,
           formatCost(point.cost),
-          `${t('requestsColumn')} ${point.requests}`,
           `${t('card.tokens')} ${formatTokens(point.tokens)}`,
+          `${t('requestsColumn')} ${point.requests}`,
         ]
         if (point.peakCost > 0 || point.offpeakCost > 0) {
           parts.push(`${t('phase.peak')} ${formatCost(point.peakCost)} · ${t('phase.offpeak')} ${formatCost(point.offpeakCost)}`)
@@ -1972,6 +1995,16 @@ window.__ModuleLoader__.load({
         const flipY = y > rect.height * 0.5
         setHover({ index, left: x + (flipX ? -12 : 12), top: y + (flipY ? -12 : 12), flipX, flipY })
       }
+      // Token buckets lead the call count everywhere the chart reports a
+      // bucket, and keep the shades its stacked bars use.
+      const tokenRowsOf = point => [
+        { label: t('items.cacheRead'), value: point.cacheReadTokens, tone: 'cacheread' },
+        { label: t('items.cacheWrite'), value: point.cacheWriteTokens, tone: 'cachewrite' },
+        { label: t('items.input'), value: point.inputTokens, tone: 'input' },
+        { label: t('items.output'), value: point.outputTokens, tone: 'output' },
+      ]
+        .filter(row => row.value > 0)
+        .map(row => ({ label: row.label, value: formatTokens(row.value), tone: row.tone }))
       const tip = (() => {
         if (hover === null) return null
         const point = view.points[hover.index]
@@ -1982,11 +2015,10 @@ window.__ModuleLoader__.load({
           if (point.offpeakCost > 0) rows.push({ label: t('phase.offpeak'), value: formatCost(point.offpeakCost), tone: 'offpeak' })
           const flat = flatOf(point)
           if (flat > 0) rows.push({ label: t('phase.flat'), value: formatCost(flat), tone: 'solid' })
-        } else {
-          rows.push({ label: t('costColumn'), value: formatCost(point.cost) })
         }
+        rows.push(...tokenRowsOf(point))
+        if (metric !== 'cost') rows.push({ label: t('costColumn'), value: formatCost(point.cost) })
         if (metric !== 'requests') rows.push({ label: t('requestsColumn'), value: String(point.requests) })
-        if (metric !== 'tokens') rows.push({ label: t('card.tokens'), value: formatTokens(point.tokens) })
         return h('div', {
           className: 'dsh-mc-trend-tip',
           style: {
@@ -2011,17 +2043,29 @@ window.__ModuleLoader__.load({
             h('h2', { className: 'dsh-mc-section-title' }, t('trendTitle')),
             h('span', { className: 'dsh-mc-section-note' }, summary)),
           h('div', { className: 'dsh-mc-trend-controls' },
-            metric !== 'cost'
-              ? null
-              : h('span', { className: 'dsh-mc-trend-legend' },
-                  h('span', { className: 'dsh-mc-trend-swatch dsh-mc-trend-offpeak' }), t('phase.offpeak'),
-                  h('span', { className: 'dsh-mc-trend-swatch dsh-mc-trend-peak' }), t('phase.peak'),
-                  hasFlat
-                    ? h('span', { className: 'dsh-mc-trend-legend-item' },
-                        h('span', { className: 'dsh-mc-trend-swatch dsh-mc-trend-solid' }), t('phase.flat'))
-                    : null),
+            h('span', { className: 'dsh-mc-trend-legend' },
+              metric === 'cost'
+                ? [
+                    h('span', { key: 'offpeak', className: 'dsh-mc-trend-legend-item' },
+                      h('span', { className: 'dsh-mc-trend-swatch dsh-mc-trend-offpeak' }), t('phase.offpeak')),
+                    h('span', { key: 'peak', className: 'dsh-mc-trend-legend-item' },
+                      h('span', { className: 'dsh-mc-trend-swatch dsh-mc-trend-peak' }), t('phase.peak')),
+                    hasFlat
+                      ? h('span', { key: 'flat', className: 'dsh-mc-trend-legend-item' },
+                          h('span', { className: 'dsh-mc-trend-swatch dsh-mc-trend-solid' }), t('phase.flat'))
+                      : null,
+                  ]
+                : metric === 'tokens'
+                  ? [
+                      ['cacheread', 'items.cacheRead'],
+                      ['cachewrite', 'items.cacheWrite'],
+                      ['input', 'items.input'],
+                      ['output', 'items.output'],
+                    ].map(([tone, key]) => h('span', { key: tone, className: 'dsh-mc-trend-legend-item' },
+                      h('span', { className: `dsh-mc-trend-swatch dsh-mc-trend-${tone}` }), t(key)))
+                  : null),
             h('div', { className: 'dsh-mc-segments', role: 'group', 'aria-label': t('trendMetric') },
-              ['cost', 'requests', 'tokens'].map(id => h('button', {
+              ['cost', 'tokens', 'requests'].map(id => h('button', {
                 key: id,
                 type: 'button',
                 className: 'dsh-mc-segment',
@@ -2062,7 +2106,14 @@ window.__ModuleLoader__.load({
                             h('span', { key: 'peak', className: 'dsh-mc-trend-seg dsh-mc-trend-peak', style: { flexGrow: shareOf(point, point.peakCost) } }),
                             h('span', { key: 'flat', className: 'dsh-mc-trend-seg dsh-mc-trend-solid', style: { flexGrow: shareOf(point, flatOf(point)) } }),
                           ]
-                        : h('span', { key: 'solid', className: 'dsh-mc-trend-seg dsh-mc-trend-solid', style: { flexGrow: 1 } }))))),
+                        : metric === 'tokens'
+                          ? [
+                              h('span', { key: 'cacheread', className: 'dsh-mc-trend-seg dsh-mc-trend-cacheread', style: { flexGrow: shareOfTokens(point, point.cacheReadTokens) } }),
+                              h('span', { key: 'cachewrite', className: 'dsh-mc-trend-seg dsh-mc-trend-cachewrite', style: { flexGrow: shareOfTokens(point, point.cacheWriteTokens) } }),
+                              h('span', { key: 'input', className: 'dsh-mc-trend-seg dsh-mc-trend-input', style: { flexGrow: shareOfTokens(point, point.inputTokens) } }),
+                              h('span', { key: 'output', className: 'dsh-mc-trend-seg dsh-mc-trend-output', style: { flexGrow: shareOfTokens(point, point.outputTokens) } }),
+                            ]
+                          : h('span', { key: 'solid', className: 'dsh-mc-trend-seg dsh-mc-trend-solid', style: { flexGrow: 1 } }))))),
                   tip)),
               h('div', { className: 'dsh-mc-trend-xaxis', 'aria-hidden': true },
                 view.points.map((point, index) => h('span', { key: point.id, className: 'dsh-mc-trend-tick' },
