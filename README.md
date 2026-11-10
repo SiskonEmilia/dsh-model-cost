@@ -52,6 +52,9 @@
   `weekday_timezone` 全部支持；窗口可跨午夜，`00:00-00:00` 表示全天；命中窗口时用块内单价**替换**标准单价。
   UI 上按浏览器时区把「今天」切成峰/谷区段画成时间条（完整周规则去供应商定价页看）。
 - 请求按 `assistant/message` 事件的完成时间定价。
+- **fork 子会话只计自己产生的调用**：fork 时父会话的事件前缀会原样复制进子会话日志
+  （`inheritedEventCount` 之前的那些事件），这些调用已经记在父会话名下，所以扫描时跳过，
+  全局合计不会重复。子会话的 pill 同理，只显示 fork 之后的自己的花费。
 - 长上下文阶梯价（`input_cost_per_token_above_200k_tokens` 等）、批量/优先档
   （`_batches` / `_priority` / `_flex`）、图片/音频/秒计费暂不参与计算。
 
@@ -101,10 +104,12 @@ pwsh -File .\install-desktop.ps1
 | 文件 | 作用 |
 | --- | --- |
 | `index.js` | Host 半边：`modelCost` Remote 服务，读会话日志、算钱、管映射与价目表 |
+| `usage.js` | 会话日志解析：跟踪 `request/header` / `request/context` 的计价路由，抽取 `assistant/message` 的 usage，跳过 fork 继承的前缀 |
 | `pricing.js` | 纯计价引擎：窗口解析、峰谷判定、今日谷时段换算、单价与成本计算、key 解析、按日序列补空、按小时分桶（无 Cordis 依赖，可直接测试） |
 | `client.js` | 浏览器半边：composer dock 的 pill 与左侧栏全局统计页 |
 | `data/cost-map.json` | 内置精简价目表快照 |
 | `test/pricing.test.mjs` | 计价引擎单测（`node --test "test/*.test.mjs"`） |
+| `test/usage.test.mjs` | 日志解析与 fork 前缀跳过单测 |
 | `tools/build-cost-map.mjs` | 从上游或本地 JSON 重新生成内置快照 |
 | `tools/cli-run.mjs` | 用 Desktop 自带 Electron Node 跑任意 `dsh ...` 子命令（安装、`--dump-config` 等） |
 

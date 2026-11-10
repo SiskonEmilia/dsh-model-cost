@@ -24,6 +24,7 @@ import {
   count, dailySeries, dayKey, dayTimeline, hourBuckets, indexCostMap, lastDayOf, perMillion, phaseAt, priceUsage,
   rangeWindow, resolveKey, standardRates,
 } from './pricing.js'
+import { scanUsage } from './usage.js'
 
 const PACKAGE_DIR = dirname(fileURLToPath(import.meta.url))
 const SNAPSHOT_PATH = join(PACKAGE_DIR, 'data', 'cost-map.json')
@@ -223,7 +224,9 @@ export default class ModelCostService extends Service {
    * Read one Session's parsed usage rows, reusing everything already parsed.
    *
    * A live Session's log only appends, so the cached prefix stays valid; a
-   * stored Session is re-read once its cache entry expires.
+   * stored Session is re-read once its cache entry expires. A forked Session's
+   * log opens with a copy of its parent's events, which are skipped: the parent
+   * already bills them.
    * @param {string} sessionId - Session id.
    * @param {boolean} force - ignore the stored-Session cache age.
    * @returns {Promise<{at:number,parsed:number,items:object[],route:object|null,lastSeq:number}>} parsed rows.
@@ -234,14 +237,19 @@ export default class ModelCostService extends Service {
     if (live === undefined && cached !== undefined && !force && Date.now() - cached.at < COLD_SCAN_TTL_MS) return cached
 
     let events
+    let inherited = 0
     if (live !== undefined) {
       events = live.snapshotEvents()
+      // Fork-inherited prefix length; absent on runtimes that predate forks.
+      inherited = Number.isInteger(live.inheritedEventCount) ? live.inheritedEventCount : 0
     } else {
       const engine = this.ctx.get('sessionQuery')
       if (engine === undefined) {
         throw new RemoteError('modelCost/query-unavailable', 'Session history is unavailable in this deployment', { sessionId })
       }
-      events = (await engine.readSession(sessionId)).events
+      const snapshot = await engine.readSession(sessionId)
+      events = snapshot.events
+      inherited = Number.isInteger(snapshot.inheritedEventCount) ? snapshot.inheritedEventCount : 0
     }
 
     const reusable = cached !== undefined && cached.parsed <= events.length ? cached : undefined
@@ -249,36 +257,14 @@ export default class ModelCostService extends Service {
       reusable.at = Date.now()
       return reusable
     }
-    let route = reusable?.route ?? null
-    const items = reusable === undefined ? [] : [...reusable.items]
-    for (let position = reusable?.parsed ?? 0; position < events.length; position += 1) {
-      const event = events[position]
-      if (event.type === 'request/header') {
-        const config = event.data?.header?.config
-        if (typeof config?.provider === 'string' && typeof config?.model === 'string') {
-          route = { provider: config.provider, model: config.model }
-        }
-      } else if (event.type === 'request/context') {
-        const context = event.data
-        if (typeof context?.provider === 'string' && typeof context?.model === 'string') {
-          route = { provider: context.provider, model: context.model }
-        }
-      } else if (event.type === 'assistant/message') {
-        const usage = event.data?.usage
-        if (typeof usage !== 'object' || usage === null) continue
-        items.push({
-          seq: event.seq,
-          time: event.time,
-          provider: route?.provider ?? null,
-          model: route?.model ?? null,
-          inputTokens: count(usage.inputTokens),
-          outputTokens: count(usage.outputTokens),
-          cacheReadTokens: count(usage.cacheReadTokens),
-          cacheWriteTokens: count(usage.cacheWriteTokens),
-        })
-      }
+    const read = scanUsage(events, { from: reusable?.parsed ?? 0, inherited, route: reusable?.route ?? null })
+    const scan = {
+      at: Date.now(),
+      parsed: events.length,
+      items: reusable === undefined ? read.items : [...reusable.items, ...read.items],
+      route: read.route,
+      lastSeq: read.lastSeq,
     }
-    const scan = { at: Date.now(), parsed: events.length, items, route, lastSeq: events.at(-1)?.seq ?? 0 }
     this.scans.set(sessionId, scan)
     return scan
   }
