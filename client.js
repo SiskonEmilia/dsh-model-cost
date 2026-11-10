@@ -717,7 +717,7 @@ window.__ModuleLoader__.load({
 .dsh-mc-trend-bars { position: absolute; inset: 0; display: flex; align-items: flex-end; }
 .dsh-mc-trend-col { position: relative; display: flex; flex: 1 1 0; flex-direction: column; justify-content: flex-end; align-items: center; min-width: 0; height: 100%; border-radius: 3px; }
 .dsh-mc-trend-col:hover, .dsh-mc-trend-col:focus-visible { background: var(--dsw-alias-interactive-bg-hover); outline: none; }
-.dsh-mc-trend-bar { box-sizing: border-box; display: flex; flex-direction: column; width: 100%; max-width: 40px; min-height: 2px; overflow: hidden; border-radius: 3px 3px 0 0; background: var(--dsw-alias-bg-layer-3, rgba(127,127,127,.14)); }
+.dsh-mc-trend-bar { box-sizing: border-box; display: flex; flex-direction: column; width: 70%; min-width: 2px; max-width: var(--dsh-mc-bar-max, 96px); min-height: 2px; overflow: hidden; border-radius: 3px 3px 0 0; background: var(--dsw-alias-bg-layer-3, rgba(127,127,127,.14)); }
 .dsh-mc-trend-seg { flex: 1 1 0; min-height: 0; }
 .dsh-mc-trend-solid { background: var(--dsw-alias-brand-primary); }
 .dsh-mc-trend-peak { background: var(--dsw-alias-state-warn-primary); }
@@ -1550,6 +1550,8 @@ window.__ModuleLoader__.load({
       /** Bar under the pointer plus the corner the tooltip hangs from. */
       const [hover, setHover] = useState(null)
       const plotRef = useRef(null)
+      /** Plot width in CSS pixels: the bar ceiling is a fraction of it. */
+      const [plotWidth, setPlotWidth] = useState(0)
       const daily = useMemo(() => buildTrend(series), [series])
       const hourly = useMemo(() => buildHourly(hours), [hours])
       // One bar cannot describe a single day, so that day is read hour by hour.
@@ -1610,6 +1612,22 @@ window.__ModuleLoader__.load({
       }
       const hasUsage = view.points.some(point => point.requests > 0)
       const summary = `${unitText} · ${spanText} · ${t('trendTotal', { value: format(total) })}`
+      // The bar keeps 70% of its column, so the gap survives any density. A
+      // fixed pixel ceiling turned a handful of bars into hairlines on a wide
+      // window, so the ceiling is a tenth of the plot instead: exactly what
+      // seven bars get, and the only thing stopping two bars from becoming
+      // blocks.
+      useEffect(() => {
+        const node = plotRef.current
+        if (node === null || typeof ResizeObserver !== 'function') return undefined
+        const observer = new ResizeObserver(entries => {
+          const width = Math.round(entries[0]?.contentRect?.width ?? 0)
+          setPlotWidth(current => (current === width ? current : width))
+        })
+        observer.observe(node)
+        return () => { observer.disconnect() }
+      }, [hasUsage])
+      const barCeiling = `${plotWidth > 0 ? Math.max(12, Math.round(plotWidth / 10)) : 96}px`
       const tipWhen = point => {
         if (view.unit !== 'hour') return point.from === point.to ? point.from : `${point.from} – ${point.to}`
         const start = String(point.hour).padStart(2, '0')
@@ -1700,6 +1718,7 @@ window.__ModuleLoader__.load({
                   role: 'img',
                   'aria-label': `${t('trendAria')} · ${summary}`,
                   ref: plotRef,
+                  style: { '--dsh-mc-bar-max': barCeiling },
                   onPointerMove: trackPointer,
                   onPointerLeave: () => { setHover(null) },
                 },
