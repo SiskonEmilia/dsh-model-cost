@@ -1235,16 +1235,27 @@ window.__ModuleLoader__.load({
       const tariffState = phase.state ?? 'unresolved'
       const phaseLabel = t(`phaseShort.${tariffState}`)
       const rates = phase.rates
+      // Cache prices are often absent; a zero would be noise in the tag, so
+      // those entries drop out (the panel still lists every rate).
+      const rateItems = []
+      if (rates !== null) {
+        rateItems.push(
+          `${t('dialogRateInput')} ${formatRate(rates.input)}`,
+          `${t('dialogRateOutput')} ${formatRate(rates.output)}`,
+        )
+        if (rates.cacheRead > 0) rateItems.push(`${t('dialogRateCache')} ${formatRate(rates.cacheRead)}`)
+        if (rates.cacheWrite > 0) rateItems.push(`${t('dialogRateWrite')} ${formatRate(rates.cacheWrite)}`)
+      }
       const label = rates === null
         ? phaseLabel
         : h(React.Fragment, null,
-            `${formatRate(rates.input)} / ${formatRate(rates.output)}`,
+            rateItems.join(' · '),
             h('span', { className: 'dsh-mc-sep', 'aria-hidden': true }, '·'),
             phaseLabel,
           )
       const aria = rates === null
         ? `${t('tariffTitle')} · ${t(`phase.${tariffState}`)}`
-        : `${t('tariffTitle')} · ${t('dialogRateInput')} ${formatRate(rates.input)} · ${t('dialogRateOutput')} ${formatRate(rates.output)} · ${t(`phase.${tariffState}`)}`
+        : `${t('tariffTitle')} · ${rateItems.join(' · ')} · ${t(`phase.${tariffState}`)}`
 
       return h('span', { ref: popover.rootRef, className: 'dsh-mc-anchor' },
         h('button', {
