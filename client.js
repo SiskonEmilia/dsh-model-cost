@@ -1501,7 +1501,7 @@ window.__ModuleLoader__.load({
                   ticks.has(index) ? labelOf(point) : ''))))
           : h('div', { className: 'dsh-mc-empty' }, t('trendEmpty')),
         hasUsage
-          ? h('div', { className: 'dsh-mc-footer' },
+          ? h('div', { className: 'dsh-mc-footer dsh-mc-trend-footer' },
               h('span', { className: 'dsh-mc-footer-note' },
                 hover >= 0 && view.points[hover] !== undefined ? detailOf(view.points[hover]) : t('trendHint')))
           : null,
