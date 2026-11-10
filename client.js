@@ -33,6 +33,7 @@ window.__ModuleLoader__.load({
     const NS = 'modelCost'
     const PANEL_ID = 'model-cost'
     const PILL_ID = 'cost'
+    const TARIFF_ID = 'tariff'
     const PANEL_MARGIN = 12
     const PANEL_GAP = 8
     const MEASURE_STYLE = { visibility: 'hidden', left: 0, top: 0 }
@@ -157,6 +158,7 @@ window.__ModuleLoader__.load({
       'mappingChange': 'Change the key for {model}',
       'openPage': 'Open global statistics',
       'dialogTitle': 'Session cost',
+      'tariffTitle': 'Model price',
       'dialogRoute': 'Model',
       'dialogKey': 'Priced as',
       'dialogPhase': 'Tariff now',
@@ -292,6 +294,7 @@ window.__ModuleLoader__.load({
       'mappingChange': '修改 {model} 的 key',
       'openPage': '打开全局统计',
       'dialogTitle': '会话成本',
+      'tariffTitle': '模型价格',
       'dialogRoute': '模型',
       'dialogKey': '计价 key',
       'dialogPhase': '当前时段',
@@ -377,6 +380,7 @@ window.__ModuleLoader__.load({
       package: 'dsh-model-cost',
       descriptors: [
         directMethod('session', ['sessionId', 'timeZone']),
+        directMethod('quote', ['query']),
         directMethod('report', ['query']),
         directMethod('searchKeys', ['query']),
         directMethod('saveMapping', ['rules']),
@@ -860,6 +864,133 @@ window.__ModuleLoader__.load({
       }
     }
 
+    /**
+     * Follow one Session's selected model and quote its tariff while at least
+     * one component subscribes. The selection is the shared model directory
+     * the composer's model seat writes, so switching models reprices the tag
+     * without a reload or a conversation.
+     * @param {object} ctx - client plugin context.
+     * @param {string} sessionId - Session whose model selection is observed.
+     * @returns {{source: object, refresh: () => void, release: () => void}} feed.
+     */
+    function createTariffFeed(ctx, sessionId) {
+      let snapshot = { status: 'idle', value: null, error: null }
+      const listeners = new Set()
+      // Tariffs are declared in UTC; today's windows are drawn in the viewer's zone.
+      const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+      let generation = 0
+      let timer = null
+      let stopWatching = null
+      let disposed = false
+      let directory = null
+      try {
+        directory = ctx.get('modelDirectories')?.directoryFor(sessionId) ?? null
+      } catch (_unavailable) {
+        // Addressed subagent sessions expose no model selection.
+      }
+
+      const publish = next => {
+        snapshot = next
+        for (const listener of [...listeners]) {
+          try {
+            listener()
+          } catch (error) {
+            console.warn('[model-cost] tariff listener failed', error)
+          }
+        }
+      }
+
+      /** Idle is the steady state before a model is known; publishing it twice is not a change. */
+      const publishIdle = () => {
+        if (snapshot.status === 'idle' && snapshot.value === null) return
+        publish({ status: 'idle', value: null, error: null })
+      }
+
+      const selectionOf = () => {
+        const current = directory === null ? null : directory.store.getSnapshot().current
+        return current === null || current === undefined
+          ? null
+          : { provider: String(current.provider), model: String(current.model) }
+      }
+
+      const quote = picked => {
+        const remote = ctx.get('remote.modelCost')
+        const mine = ++generation
+        if (remote === undefined) {
+          publishIdle()
+          return Promise.resolve()
+        }
+        return remote.quote({ provider: picked.provider, model: picked.model, timeZone }).then(result => {
+          if (disposed || mine !== generation) return
+          if (result?.ok === true) publish({ status: 'ready', value: result.value, error: null })
+          else publish({ status: 'error', value: snapshot.value, error: result?.error?.message ?? 'unknown failure' })
+        }, error => {
+          if (disposed || mine !== generation) return
+          publish({ status: 'error', value: snapshot.value, error: error instanceof Error ? error.message : String(error) })
+        })
+      }
+
+      const load = () => {
+        const picked = selectionOf()
+        if (picked === null) {
+          publishIdle()
+          return
+        }
+        void quote(picked)
+      }
+
+      // Only a different route needs a new quote; the same route's refreshes are
+      // the timer's job, so catalog churn does not re-ask the host.
+      const followSelection = () => {
+        const picked = selectionOf()
+        if (picked === null) {
+          publishIdle()
+          return
+        }
+        const current = snapshot.value
+        if (current !== null && current.route.provider === picked.provider && current.route.model === picked.model) return
+        void quote(picked)
+      }
+
+      const subscribe = listener => {
+        listeners.add(listener)
+        if (listeners.size === 1) {
+          stopWatching = directory === null ? null : directory.store.subscribe(followSelection)
+          if (directory !== null) {
+            directory.load().catch(() => { /* the model seat surfaces its own failure */ })
+          }
+          followSelection()
+          // Tariff boundaries and an updated price map both land within a minute.
+          timer = setInterval(load, 30000)
+        }
+        let released = false
+        return () => {
+          if (released) return
+          released = true
+          listeners.delete(listener)
+          if (listeners.size === 0) {
+            clearInterval(timer)
+            timer = null
+            if (stopWatching !== null) stopWatching()
+            stopWatching = null
+          }
+        }
+      }
+
+      return {
+        source: { getSnapshot: () => snapshot, subscribe },
+        refresh: load,
+        release: () => {
+          disposed = true
+          listeners.clear()
+          clearInterval(timer)
+          timer = null
+          if (stopWatching !== null) stopWatching()
+          stopWatching = null
+        },
+      }
+    }
+
     /* ------------------------------------------------------------------ */
     /* Hover + click popover                                               */
     /* ------------------------------------------------------------------ */
@@ -1061,6 +1192,136 @@ window.__ModuleLoader__.load({
           forkBefore === null
             ? null
             : h('p', { className: 'dsh-mc-note' }, t('dialogForkNote')),
+          h('p', { className: 'dsh-mc-note' },
+            h('button', {
+              type: 'button',
+              className: 'dsh-mc-link',
+              onClick: () => { popover.togglePin(); openPage() },
+            }, t('openPage')),
+            h('span', { className: 'dsh-mc-sep', 'aria-hidden': true }, '·'),
+            h('a', {
+              className: 'dsh-mc-link',
+              href: phase?.source ?? COST_MAP_BROWSE_URL,
+              target: '_blank',
+              rel: 'noreferrer noopener',
+            }, t('priceSource'))),
+        ),
+        document.body,
+      )
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* New-Session tariff tag                                              */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * The composer's new-Session tag: the selected model's tariff state and
+     * price, which is all there is to show before the first billed call. It
+     * hides itself once the Session has history; the dock's cost pill takes
+     * over from there.
+     * @param {object} props - slot props plus the injected tariff feed.
+     * @returns {object|null} rendered tag.
+     */
+    function TariffPill(props) {
+      const { useTariff, useSession, t, openPage } = props
+      const state = useTariff(value => value)
+      const blank = useSession(snapshot => snapshot.blank)
+      const popover = useHoverPopover()
+      const quote = state?.value ?? null
+      if (blank !== true || quote === null) return null
+      const phase = quote.phase ?? null
+      if (phase === null) return null
+
+      const tariffState = phase.state ?? 'unresolved'
+      const phaseLabel = t(`phaseShort.${tariffState}`)
+      const rates = phase.rates
+      const label = rates === null
+        ? phaseLabel
+        : h(React.Fragment, null,
+            `${formatRate(rates.input)} / ${formatRate(rates.output)}`,
+            h('span', { className: 'dsh-mc-sep', 'aria-hidden': true }, '·'),
+            phaseLabel,
+          )
+      const aria = rates === null
+        ? `${t('tariffTitle')} · ${t(`phase.${tariffState}`)}`
+        : `${t('tariffTitle')} · ${t('dialogRateInput')} ${formatRate(rates.input)} · ${t('dialogRateOutput')} ${formatRate(rates.output)} · ${t(`phase.${tariffState}`)}`
+
+      return h('span', { ref: popover.rootRef, className: 'dsh-mc-anchor' },
+        h('button', {
+          type: 'button',
+          className: 'dsh-mc-pill',
+          'aria-haspopup': 'dialog',
+          'aria-expanded': popover.open,
+          'aria-label': aria,
+          onClick: popover.togglePin,
+          ...popover.panelProps,
+          ...popover.triggerProps,
+        },
+          h(PriceTag, { size: 14, className: tagClassOf(tariffState) }),
+          h('span', { className: 'dsh-mc-pill-label' }, label),
+        ),
+        popover.open && renderTariffPanel(popover, quote, t, openPage),
+      )
+    }
+
+    /**
+     * Render the tariff tag's details: the route, its price key, the tariff now
+     * in force, the rates that tariff applies, and today's windows. Session
+     * statistics stay out — there is no Session to report on yet.
+     * @param {object} popover - hover-popover seat.
+     * @param {object} quote - host quote for the selected route.
+     * @param {Function} t - translator.
+     * @param {Function} openPage - navigate to the global page.
+     * @returns {object} portal element.
+     */
+    function renderTariffPanel(popover, quote, t, openPage) {
+      const phase = quote.phase ?? null
+      const now = Date.now()
+      const rows = []
+      if (phase !== null) {
+        rows.push(h('dt', { key: 'model' }, t('dialogRoute')),
+          h('dd', { key: 'model-v' }, `${phase.provider ?? '—'} / ${phase.model ?? '—'}`))
+        rows.push(h('dt', { key: 'key' }, t('dialogKey')),
+          h('dd', { key: 'key-v' }, phase.key ?? t('mappingUnresolved')))
+        rows.push(h('dt', { key: 'phase' }, t('dialogPhase')),
+          h('dd', { key: 'phase-v' },
+            h('span', { className: `dsh-mc-phase-value ${tagClassOf(phase.state)}` }, t(`phase.${phase.state}`)),
+            phase.nextAt === null ? null : ` · ${formatNextChange(phase.nextAt, phase.nextState, now, t)}`))
+        if (phase.rates !== null) {
+          rows.push(h('dt', { key: 'rates' }, t('dialogRates')),
+            h('dd', { key: 'rates-v' },
+              h('div', null, `${t('dialogRateInput')} ${formatRate(phase.rates.input)} · ${t('dialogRateOutput')} ${formatRate(phase.rates.output)}`),
+              h('div', null, `${t('dialogRateCache')} ${formatRate(phase.rates.cacheRead)} · ${t('dialogRateWrite')} ${formatRate(phase.rates.cacheWrite)}`)))
+        }
+      }
+
+      return ReactDOM.createPortal(
+        h('div', {
+          ref: popover.panelRef,
+          className: 'dsh-mc-panel',
+          role: 'dialog',
+          'aria-label': t('tariffTitle'),
+          style: popover.pos ?? MEASURE_STYLE,
+          ...popover.panelProps,
+        },
+          h('div', { className: 'dsh-mc-panel-title' },
+            h('span', { className: 'dsh-mc-panel-title-label' },
+              h(PriceTag, { size: 14 }),
+              t('tariffTitle')),
+            h('span', null,
+              phase === null || phase.rates === null
+                ? t('phase.unresolved')
+                : `${formatRate(phase.rates.input)} / ${formatRate(phase.rates.output)}`)),
+          h('div', { className: 'dsh-mc-panel-rule', 'aria-hidden': true }),
+          h('dl', { className: 'dsh-mc-details' }, rows),
+          phase !== null && phase.hasSchedule && (phase.timeline?.length ?? 0) > 0
+            ? h('div', { className: 'dsh-mc-block' },
+                h('div', { className: 'dsh-mc-block-caption' }, t('timelineCaption')),
+                h(PhaseTimeline, { segments: phase.timeline, nowAt: now, t }))
+            : null,
+          phase !== null && phase.rates === null
+            ? h('p', { className: 'dsh-mc-note' }, t('mappingIntro'))
+            : null,
           h('p', { className: 'dsh-mc-note' },
             h('button', {
               type: 'button',
@@ -1927,6 +2188,36 @@ window.__ModuleLoader__.load({
               return { hooks: { cost: feed.source }, refresh: feed.refresh, openPage: face.openPage }
             },
           }, CostPill))
+
+          // A Session with no billed call yet has no total to show, so the tag
+          // beside the model seat quotes the selected model's tariff instead.
+          // It needs the shared model directory, so it mounts only where that
+          // service exists.
+          scope.inject(['slots', 'modelDirectories'], tariff => {
+            const tariffs = new Map()
+            const tariffFor = sessionId => {
+              let feed = tariffs.get(sessionId)
+              if (feed === undefined) {
+                feed = createTariffFeed(tariff, sessionId)
+                tariffs.set(sessionId, feed)
+              }
+              return feed
+            }
+            tariff.slots.inject('conversation.input.right', () => tariff.slots.register({
+              name: 'conversation.input.right',
+              id: TARIFF_ID,
+              order: 1,
+              locale: NS,
+              inject: sessionId => {
+                const feed = tariffFor(sessionId)
+                return { hooks: { tariff: feed.source }, refresh: feed.refresh, openPage: face.openPage }
+              },
+            }, TariffPill))
+            tariff.effect(() => () => {
+              for (const feed of tariffs.values()) feed.release()
+              tariffs.clear()
+            }, 'model-cost: release tariff feeds')
+          })
 
           scope.slots.inject('main', () => scope.slots.register({
             name: 'main',
