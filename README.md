@@ -38,6 +38,7 @@
   按小时展开**：24 根柱子、刻度为 00/04/08/12/16/20/23，能看出一天里的峰谷切换。
   悬停任意柱子，底部显示那个时段（天/周/月/小时）的日期、花费、调用数、tokens 与峰/谷拆分。
 - **分组表**：每组成本、占比条形、调用数、输入/缓存读/输出 tokens。
+  标题旁显示扫描了多少个会话，以及其中多少个直接来自本地缓存。
 - **价格映射**：列出会话记录里观察到的每一条 `provider / model` 路由，
   显示当前解析结果（自动 / 多义 / 未定价）与它使用的价目表 key，并可改成本地映射规则。
   规则按 `provider + model` 或仅 `model` 生效，保存后立即用于统计与 pill。
@@ -60,6 +61,23 @@
   「fork 前」金额因此不会随父会话继续活动而变化。
 - 长上下文阶梯价（`input_cost_per_token_above_200k_tokens` 等）、批量/优先档
   （`_batches` / `_priority` / `_flex`）、图片/音频/秒计费暂不参与计算。
+
+## 本地缓存
+
+统计页与会话面板读同一份「每会话已解析的 usage 行」。这份数据按会话落盘在
+`$DSH_HOME/model-cost/cache/<session>.json`，重启后不再重读未变化的日志：
+
+- **格式版本**：每个文件带 `version`。当前实现不认识的版本直接当未命中，读完日志后覆盖重写。
+- **增量依据**：文件里记着读日志时 `sessionPersistence` 给出的 `revision`（由文件 stat 派生，
+  追加或改写都会变）。下次统计先比对 revision：一致就直接用缓存，**不打开日志**；
+  不一致才重读该会话，并复用已解析的前缀、只解析追加的尾部。
+  活跃会话（`ctx.sessions` 里还在内存中的）不走磁盘缓存——它们的事件可能比已刷盘的新，
+  直接按内存增量解析；只有落盘且 revision 可比的会话才走缓存。
+- **计价签名**：`pricing` = 计价引擎版本（`PRICING_VERSION`）+ 价目表内容指纹 + 映射规则指纹。
+  签名一致就沿用缓存里的 `cost`/`phase`；更新价目表、改映射规则或升级计价引擎后，
+  只对已缓存的行重新定价，不重读日志。
+- **清理**：写入走「临时文件 + rename」，中断不会留下半截文件；统计时顺手删除已不在
+  会话列表里、且超过 7 天的缓存，以及一小时前的临时文件。
 
 ## 价格映射
 
@@ -107,17 +125,22 @@ pwsh -File .\install-desktop.ps1
 | 文件 | 作用 |
 | --- | --- |
 | `index.js` | Host 半边：`modelCost` Remote 服务，读会话日志、算钱、管映射与价目表 |
-| `usage.js` | 会话日志解析：跟踪 `request/header` / `request/context` 的计价路由，抽取 `assistant/message` 的 usage，跳过 fork 继承的前缀 |
+| `usage.js` | 会话日志解析：跟踪 `request/header` / `request/context` 的计价路由，抽取 `assistant/message` 的 usage，跳过 fork 继承的前缀；并支持从上次读到的位置续读 |
 | `pricing.js` | 纯计价引擎：窗口解析、峰谷判定、今日谷时段换算、单价与成本计算、key 解析、按日序列补空、按小时分桶（无 Cordis 依赖，可直接测试） |
+| `cache.js` | 会话行缓存的文件格式：版本号、行的编码与校验、计价签名 |
 | `client.js` | 浏览器半边：composer dock 的 pill 与左侧栏全局统计页 |
 | `data/cost-map.json` | 内置精简价目表快照 |
 | `test/pricing.test.mjs` | 计价引擎单测（`node --test "test/*.test.mjs"`） |
-| `test/usage.test.mjs` | 日志解析与 fork 前缀跳过单测 |
+| `test/usage.test.mjs` | 日志解析、续读前缀校验与 fork 前缀跳过单测 |
+| `test/cache.test.mjs` | 缓存格式的编解码与损坏数据拒绝 |
+| `test/service.test.mjs` | Host 服务的端到端缓存行为（重启续用、追加只读尾部、改规则重定价、版本不匹配回退） |
+| `test/support/` | 上述 Host 测试用的 Cordis / Typert 桩与模块解析钩子 |
 | `tools/build-cost-map.mjs` | 从上游或本地 JSON 重新生成内置快照 |
 | `tools/cli-run.mjs` | 用 Desktop 自带 Electron Node 跑任意 `dsh ...` 子命令（安装、`--dump-config` 等） |
 
 数据来源：会话日志的 `request/header`（provider、model）与 `assistant/message`（usage、完成时间）；
-会话枚举与冷会话读取走 `ctx.sessionQuery`，活跃会话走 `ctx.sessions`。
+会话枚举与冷会话读取走 `ctx.sessionQuery`，活跃会话走 `ctx.sessions`，
+冷会话的变更判定走 `ctx.sessionPersistence` 报告的 `revision`。
 
 ## 已知限制
 
@@ -125,3 +148,5 @@ pwsh -File .\install-desktop.ps1
 - 缓存写入价缺失时按输入价计，这是 LiteLLM 的兜底口径，个别供应商的真实账单可能不同。
 - 全局统计一次最多扫描 800 个会话（按最新优先），超出的会提示截断。
 - 会话详情页的标题来自 `session/title`，读取失败时回退到会话 id 前 8 位。
+- 第一次统计（或缓存被清空后）仍要读一遍所有会话日志；之后只读 revision 变化过的日志。
+  上次运行期间活跃的会话不写缓存（内存事件可能比已刷盘的多），重启后第一次统计会重读它们。
