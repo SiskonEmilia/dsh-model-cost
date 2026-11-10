@@ -717,7 +717,7 @@ window.__ModuleLoader__.load({
 .dsh-mc-trend-bars { position: absolute; inset: 0; display: flex; align-items: flex-end; }
 .dsh-mc-trend-col { position: relative; display: flex; flex: 1 1 0; flex-direction: column; justify-content: flex-end; align-items: center; min-width: 0; height: 100%; border-radius: 3px; }
 .dsh-mc-trend-col:hover, .dsh-mc-trend-col:focus-visible { background: var(--dsw-alias-interactive-bg-hover); outline: none; }
-.dsh-mc-trend-bar { box-sizing: border-box; display: flex; flex-direction: column; width: 70%; min-width: 2px; max-width: var(--dsh-mc-bar-max, 96px); min-height: 2px; overflow: hidden; border-radius: 3px 3px 0 0; background: var(--dsw-alias-bg-layer-3, rgba(127,127,127,.14)); }
+.dsh-mc-trend-bar { box-sizing: border-box; display: flex; flex-direction: column; width: 70%; min-width: 2px; max-width: var(--dsh-mc-bar-max, 96px); min-height: 2px; overflow: hidden; border-radius: var(--dsh-mc-bar-radius, 3px) var(--dsh-mc-bar-radius, 3px) 0 0; background: var(--dsw-alias-bg-layer-3, rgba(127,127,127,.14)); }
 .dsh-mc-trend-seg { flex: 1 1 0; min-height: 0; }
 .dsh-mc-trend-solid { background: var(--dsw-alias-brand-primary); }
 .dsh-mc-trend-peak { background: var(--dsw-alias-state-warn-primary); }
@@ -1627,7 +1627,14 @@ window.__ModuleLoader__.load({
         observer.observe(node)
         return () => { observer.disconnect() }
       }, [hasUsage])
-      const barCeiling = `${plotWidth > 0 ? Math.max(12, Math.round(plotWidth / 10)) : 96}px`
+      const barCeiling = plotWidth > 0 ? Math.max(12, Math.round(plotWidth / 10)) : 96
+      // What the CSS width resolves to: 70% of the column pitch, under the ceiling.
+      const barWidth = plotWidth > 0
+        ? Math.min(plotWidth * 0.7 / Math.max(1, view.points.length), barCeiling)
+        : 0
+      // Corners follow the bar: 3px keeps a hairline bar crisp, while a wide bar
+      // gets a proportional sweep instead of a stamp-sized rounding.
+      const barRadius = barWidth === 0 ? 3 : Math.min(18, Math.max(3, Math.round(barWidth * 0.14)))
       const tipWhen = point => {
         if (view.unit !== 'hour') return point.from === point.to ? point.from : `${point.from} – ${point.to}`
         const start = String(point.hour).padStart(2, '0')
@@ -1718,7 +1725,7 @@ window.__ModuleLoader__.load({
                   role: 'img',
                   'aria-label': `${t('trendAria')} · ${summary}`,
                   ref: plotRef,
-                  style: { '--dsh-mc-bar-max': barCeiling },
+                  style: { '--dsh-mc-bar-max': `${barCeiling}px`, '--dsh-mc-bar-radius': `${barRadius}px` },
                   onPointerMove: trackPointer,
                   onPointerLeave: () => { setHover(null) },
                 },
