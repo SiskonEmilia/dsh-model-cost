@@ -1,0 +1,6 @@
+# Inserts the model-cost Host service (index.js). The browser half loads
+# through the ./client export; the service reads the bundled LiteLLM cost map
+# and prices session logs on request.
+- insert:
+    - id: model-cost
+      name: dsh-model-cost
