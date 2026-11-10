@@ -75,7 +75,6 @@ window.__ModuleLoader__.load({
     const en = {
       'panel': 'Model cost',
       'title': 'Model cost',
-      'subtitle': 'Session and corpus spend priced with the LiteLLM Model Cost Map',
       'refresh': 'Refresh',
       'refreshMap': 'Update price map',
       'refreshingMap': 'Updating…',
@@ -211,7 +210,6 @@ window.__ModuleLoader__.load({
     const zh = {
       'panel': '模型成本',
       'title': '模型成本',
-      'subtitle': '基于 LiteLLM Model Cost Map 的会话与全局花费统计',
       'refresh': '刷新',
       'refreshMap': '更新价目表',
       'refreshingMap': '更新中…',
@@ -1310,7 +1308,6 @@ window.__ModuleLoader__.load({
         h('header', { className: 'dsh-mc-head' },
           h('div', null,
             h('h1', { className: 'dsh-mc-h1' }, t('title')),
-            h('p', { className: 'dsh-mc-sub' }, t('subtitle')),
             map === null
               ? null
               : h('p', { className: 'dsh-mc-sub' },
