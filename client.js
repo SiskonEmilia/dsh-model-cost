@@ -405,6 +405,18 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * CSS color class for one tariff state.
+     * @param {string} state - `peak`, `offpeak`, `flat`, or `unresolved`.
+     * @returns {string} class name that sets the matching color.
+     */
+    function tagClassOf(state) {
+      if (state === 'peak') return 'dsh-mc-tag-peak'
+      if (state === 'offpeak') return 'dsh-mc-tag-offpeak'
+      if (state === 'unresolved') return 'dsh-mc-tag-unresolved'
+      return 'dsh-mc-tag-flat'
+    }
+
+    /**
      * Render the distance to the next tariff change and the state it enters.
      * @param {number|null} nextAt - instant of the change.
      * @param {'peak'|'offpeak'|null} nextState - state after the change.
@@ -577,6 +589,7 @@ window.__ModuleLoader__.load({
 .dsh-mc-details dt { color: var(--dsw-alias-label-tertiary); }
 .dsh-mc-details dd { color: var(--dsw-alias-label-secondary); font-variant-numeric: tabular-nums; text-align: right; overflow-wrap: anywhere; }
 .dsh-mc-details dd.dsh-mc-left { text-align: left; }
+.dsh-mc-phase-value { font-weight: 600; }
 .dsh-mc-subhead { margin: 12px 0 6px; color: var(--dsw-alias-label-tertiary); font-size: 11px; letter-spacing: .02em; text-transform: uppercase; }
 .dsh-mc-block { margin-top: 12px; padding-top: 10px; border-top: .5px solid var(--dsw-alias-border-l2); }
 .dsh-mc-block-caption { margin-bottom: 6px; color: var(--dsw-alias-label-tertiary); font-size: 11px; }
@@ -884,11 +897,7 @@ window.__ModuleLoader__.load({
       if (totals.requests === 0) return null
 
       const phaseState = phase?.state ?? 'unresolved'
-      const tagClass = phaseState === 'peak'
-        ? 'dsh-mc-tag-peak'
-        : phaseState === 'offpeak'
-          ? 'dsh-mc-tag-offpeak'
-          : phaseState === 'unresolved' ? 'dsh-mc-tag-unresolved' : 'dsh-mc-tag-flat'
+      const tagClass = tagClassOf(phaseState)
       const phaseLabel = phaseState === 'unresolved' ? null : t(`phaseShort.${phaseState}`)
       const amount = formatCost(totals.cost)
       const label = phaseLabel === null
@@ -941,7 +950,9 @@ window.__ModuleLoader__.load({
         rows.push(h('dt', { key: 'key' }, t('dialogKey')),
           h('dd', { key: 'key-v', className: 'dsh-mc-left' }, phase.key ?? t('mappingUnresolved')))
         rows.push(h('dt', { key: 'phase' }, t('dialogPhase')),
-          h('dd', { key: 'phase-v' }, `${t(`phase.${phase.state}`)}${phase.nextAt === null ? '' : ` · ${formatNextChange(phase.nextAt, phase.nextState, now, t)}`}`))
+          h('dd', { key: 'phase-v' },
+            h('span', { className: `dsh-mc-phase-value ${tagClassOf(phase.state)}` }, t(`phase.${phase.state}`)),
+            phase.nextAt === null ? null : ` · ${formatNextChange(phase.nextAt, phase.nextState, now, t)}`))
         if (phase.rates !== null) {
           rows.push(h('dt', { key: 'rates' }, t('dialogRates')),
             h('dd', { key: 'rates-v', className: 'dsh-mc-left' },
