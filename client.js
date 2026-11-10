@@ -38,6 +38,35 @@ window.__ModuleLoader__.load({
     const MEASURE_STYLE = { visibility: 'hidden', left: 0, top: 0 }
     /** Fallback detail page when a cost-map entry carries no provider price source. */
     const COST_MAP_BROWSE_URL = 'https://models.litellm.ai/'
+    /** Browser-local memory of the sources the reader hid from the statistics. */
+    const HIDDEN_SOURCES_KEY = 'dsh-model-cost:hidden-sources'
+
+    /**
+     * Read the hidden-source list, tolerating a browser that forbids storage.
+     * @returns {string[]} provider ids.
+     */
+    function readHiddenSources() {
+      try {
+        const raw = window.localStorage.getItem(HIDDEN_SOURCES_KEY)
+        const parsed = raw === null ? null : JSON.parse(raw)
+        return Array.isArray(parsed) ? parsed.filter(value => typeof value === 'string') : []
+      } catch (_unavailable) {
+        return []
+      }
+    }
+
+    /**
+     * Persist the hidden-source list for the next visit.
+     * @param {string[]} list - provider ids.
+     * @returns {void}
+     */
+    function writeHiddenSources(list) {
+      try {
+        window.localStorage.setItem(HIDDEN_SOURCES_KEY, JSON.stringify(list))
+      } catch (_unavailable) {
+        // Storage is optional: the filter still applies to this page view.
+      }
+    }
 
     /* ------------------------------------------------------------------ */
     /* Locale                                                              */
@@ -73,6 +102,9 @@ window.__ModuleLoader__.load({
       'dimension.phase': 'Peak / off-peak',
       'dimensionLabel': 'Group by',
       'rangeLabel': 'Range',
+      'sourcesLabel': 'Sources',
+      'sourcesEmpty': 'Every source is hidden. Turn one back on above.',
+      'sourceUnknown': 'Unknown',
       'card.cost': 'Total cost',
       'card.requests': 'Requests',
       'card.tokens': 'Tokens',
@@ -206,6 +238,9 @@ window.__ModuleLoader__.load({
       'dimension.phase': '峰谷',
       'dimensionLabel': '统计口径',
       'rangeLabel': '时间范围',
+      'sourcesLabel': '来源',
+      'sourcesEmpty': '所有来源都被隐藏了，在上方重新打开一个即可恢复统计。',
+      'sourceUnknown': '未记录',
       'card.cost': '总成本',
       'card.requests': '请求数',
       'card.tokens': 'Tokens',
@@ -637,6 +672,17 @@ window.__ModuleLoader__.load({
 .dsh-mc-segment { border: none; background: transparent; color: var(--dsw-alias-label-tertiary); font: inherit; font-size: 12px; line-height: 24px; padding: 0 10px; border-radius: 6px; cursor: pointer; white-space: nowrap; }
 .dsh-mc-segment[aria-pressed='true'] { background: var(--dsw-alias-bg-layer-3, rgba(127,127,127,.18)); color: var(--dsw-alias-label-primary); }
 .dsh-mc-segment:hover:not([aria-pressed='true']) { color: var(--dsw-alias-label-secondary); }
+.dsh-mc-sources { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.dsh-mc-sources-label { color: var(--dsw-alias-label-tertiary); font-size: 12px; }
+.dsh-mc-chips { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.dsh-mc-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 240px; height: 24px; padding: 0 9px 0 7px; border: .5px solid var(--dsw-alias-border-l2); border-radius: 12px; background: transparent; color: var(--dsw-alias-label-secondary); font: inherit; font-size: 12px; line-height: 1; cursor: pointer; }
+.dsh-mc-chip:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.dsh-mc-chip:focus-visible { outline: 1px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }
+.dsh-mc-chip-mark { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 12px; height: 12px; border: .5px solid var(--dsw-alias-border-l2); border-radius: 3px; color: transparent; font-size: 9px; line-height: 1; }
+.dsh-mc-chip[aria-pressed='true'] .dsh-mc-chip-mark { border-color: transparent; background: var(--dsw-alias-brand-primary); color: var(--dsw-alias-label-primary-inverted, #fff); }
+.dsh-mc-chip[aria-pressed='false'] { color: var(--dsw-alias-label-tertiary); }
+.dsh-mc-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dsh-mc-chip-cost { flex: none; color: var(--dsw-alias-label-tertiary); font-size: 11px; font-variant-numeric: tabular-nums; }
 .dsh-mc-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
 .dsh-mc-card { padding: 12px 14px; border-radius: var(--dsw-radius-md, 10px); background: var(--dsw-alias-bg-layer-2, rgba(127,127,127,.06)); border: .5px solid var(--dsw-alias-border-l1); }
 .dsh-mc-card-label { color: var(--dsw-alias-label-tertiary); font-size: 11px; }
@@ -678,6 +724,14 @@ window.__ModuleLoader__.load({
 .dsh-mc-trend-offpeak { background: var(--dsw-alias-state-success-primary); }
 .dsh-mc-trend-xaxis { display: flex; margin-left: 56px; color: var(--dsw-alias-label-tertiary); font-size: 9px; line-height: 12px; }
 .dsh-mc-trend-tick { flex: 1 1 0; min-width: 0; text-align: center; white-space: nowrap; overflow: visible; }
+.dsh-mc-section.dsh-mc-trend-section { overflow: visible; }
+.dsh-mc-trend-tip { position: absolute; z-index: 5; box-sizing: border-box; min-width: 156px; max-width: 260px; padding: 8px 10px; border-radius: var(--dsw-radius-md, 8px); background: var(--dsw-specific-menu, var(--dsw-alias-bg-layer-2)); backdrop-filter: var(--dsw-menu-backdrop-filter, blur(12px)); box-shadow: var(--dsw-elevation-prominent, 0 8px 24px rgba(0,0,0,.28)); color: var(--dsw-alias-label-secondary); font-size: 11px; line-height: 16px; pointer-events: none; }
+.dsh-mc-trend-tip-head { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; margin-bottom: 5px; }
+.dsh-mc-trend-tip-when { color: var(--dsw-alias-label-tertiary); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.dsh-mc-trend-tip-value { color: var(--dsw-alias-label-primary); font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.dsh-mc-trend-tip-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.dsh-mc-trend-tip-label { display: inline-flex; align-items: center; gap: 5px; color: var(--dsw-alias-label-tertiary); }
+.dsh-mc-trend-tip-amount { color: var(--dsw-alias-label-secondary); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .dsh-mc-empty { padding: 26px 14px; text-align: center; color: var(--dsw-alias-label-tertiary); font-size: 12px; }
 .dsh-mc-error { padding: 12px 14px; border-radius: var(--dsw-radius-md, 10px); background: var(--dsw-alias-interactive-bg-hover-danger, rgba(220,80,80,.12)); color: var(--dsw-alias-state-error-primary); font-size: 12px; display: flex; gap: 10px; align-items: center; justify-content: space-between; }
 .dsh-mc-loading { color: var(--dsw-alias-label-tertiary); font-size: 12px; }
@@ -1130,6 +1184,7 @@ window.__ModuleLoader__.load({
       const { loadReport, searchKeys, saveMapping, refreshMap, t } = props
       const [range, setRange] = useState('all')
       const [dimension, setDimension] = useState('model')
+      const [hiddenSources, setHiddenSources] = useState(readHiddenSources)
       const [report, setReport] = useState(null)
       const [status, setStatus] = useState('loading')
       const [error, setError] = useState(null)
@@ -1142,7 +1197,7 @@ window.__ModuleLoader__.load({
       useEffect(() => {
         let cancelled = false
         setStatus(current => (report === null ? 'loading' : 'refreshing'))
-        loadReport({ range, dimension, limit: 25 }).then(result => {
+        loadReport({ range, dimension, limit: 25, exclude: hiddenSources }).then(result => {
           if (cancelled) return
           if (result?.ok === true) {
             setReport(result.value)
@@ -1156,7 +1211,7 @@ window.__ModuleLoader__.load({
         })
         return () => { cancelled = true }
         // `report` supplies only the initial loading flag; re-running on it would loop.
-      }, [range, dimension, revision, loadReport])
+      }, [range, dimension, revision, hiddenSources, loadReport])
 
       const dirty = useMemo(() => {
         if (report === null || draft === null) return false
@@ -1230,8 +1285,25 @@ window.__ModuleLoader__.load({
         }
       }
 
+      /**
+       * Count or leave out one provider's calls on the next report.
+       * @param {string} provider - provider id as the host reports it.
+       * @returns {void}
+       */
+      const toggleSource = provider => {
+        const next = hiddenSources.includes(provider)
+          ? hiddenSources.filter(value => value !== provider)
+          : [...hiddenSources, provider]
+        setHiddenSources(next)
+        writeHiddenSources(next)
+      }
+
       const map = report?.map ?? null
       const totals = report?.totals ?? null
+      const sources = report?.sources ?? []
+      // One source needs no switch. A hidden one must stay reachable even when
+      // it is the only source the current range recorded.
+      const showSources = sources.length > 1 || (sources.length > 0 && hiddenSources.length > 0)
       const maxCost = report === null ? 0 : Math.max(0, ...report.groups.map(group => group.cost))
 
       return h('div', { className: 'dsh-mc-page' },
@@ -1280,6 +1352,25 @@ window.__ModuleLoader__.load({
                 onClick: () => { setDimension(id) },
               }, t(`dimension.${id}`))))),
         ),
+        showSources
+          ? h('section', { className: 'dsh-mc-sources', 'aria-label': t('sourcesLabel') },
+              h('span', { className: 'dsh-mc-sources-label' }, t('sourcesLabel')),
+              h('div', { className: 'dsh-mc-chips' },
+                sources.map(source => {
+                  const shown = !hiddenSources.includes(source.provider)
+                  return h('button', {
+                    key: source.provider,
+                    type: 'button',
+                    className: 'dsh-mc-chip',
+                    'aria-pressed': shown,
+                    onClick: () => { toggleSource(source.provider) },
+                  },
+                    h('span', { className: 'dsh-mc-chip-mark', 'aria-hidden': true }, shown ? '✓' : ''),
+                    h('span', { className: 'dsh-mc-chip-name' },
+                      source.provider === '—' ? t('sourceUnknown') : source.provider),
+                    h('span', { className: 'dsh-mc-chip-cost' }, formatCost(source.cost)))
+                })))
+          : null,
         totals === null
           ? (status === 'loading' ? h('div', { className: 'dsh-mc-loading' }, t('loading')) : null)
           : h('section', { className: 'dsh-mc-cards' },
@@ -1299,7 +1390,7 @@ window.__ModuleLoader__.load({
               totals.unpricedRequests === 0 ? null : h(Card, { label: t('card.unpriced'), value: String(totals.unpricedRequests), note: t('mappingIntro') })),
         report === null || totals === null
           ? null
-          : h(TrendChart, { series: report.series ?? [], hours: report.hours ?? null, t }),
+          : h(TrendChart, { series: report.series ?? [], hours: report.hours ?? null, filtered: hiddenSources.length > 0, t }),
         report === null || totals === null
           ? null
           : h('section', { className: 'dsh-mc-section' },
@@ -1310,7 +1401,7 @@ window.__ModuleLoader__.load({
                   + `${report.scanned.cached > 0 ? ` · ${t('scanCached', { count: report.scanned.cached })}` : ''}`
                   + `${report.scanned.capped ? ` · ${t('scanCapped', { scanned: report.scanned.sessions })}` : ''}`)),
               report.groups.length === 0
-                ? h('div', { className: 'dsh-mc-empty' }, t('empty'))
+                ? h('div', { className: 'dsh-mc-empty' }, hiddenSources.length > 0 ? t('sourcesEmpty') : t('empty'))
                 : h('table', { className: 'dsh-mc-table' },
                     h('thead', null, h('tr', null,
                       h('th', null, t(`dimension.${report.dimension}`)),
@@ -1450,13 +1541,15 @@ window.__ModuleLoader__.load({
     /**
      * Usage and spend over time: one bar per day (weeks or months on long
      * ranges), stacked by tariff when showing money, with a metric switch and
-     * per-bucket detail on hover.
-     * @param {{series: object[], t: Function}} props - the report series and translator.
+     * a pointer-following detail card.
+     * @param {{series: object[], hours: object|null, filtered: boolean, t: Function}} props - the report series, whether a source filter is on, and the translator.
      * @returns {object} section element.
      */
-    function TrendChart({ series, hours, t }) {
+    function TrendChart({ series, hours, filtered = false, t }) {
       const [metric, setMetric] = useState('cost')
-      const [hover, setHover] = useState(-1)
+      /** Bar under the pointer plus the corner the tooltip hangs from. */
+      const [hover, setHover] = useState(null)
+      const plotRef = useRef(null)
       const daily = useMemo(() => buildTrend(series), [series])
       const hourly = useMemo(() => buildHourly(hours), [hours])
       // One bar cannot describe a single day, so that day is read hour by hour.
@@ -1517,8 +1610,62 @@ window.__ModuleLoader__.load({
       }
       const hasUsage = view.points.some(point => point.requests > 0)
       const summary = `${unitText} · ${spanText} · ${t('trendTotal', { value: format(total) })}`
+      const tipWhen = point => {
+        if (view.unit !== 'hour') return point.from === point.to ? point.from : `${point.from} – ${point.to}`
+        const start = String(point.hour).padStart(2, '0')
+        const end = String((point.hour + 1) % 24).padStart(2, '0')
+        return `${start}:00 – ${end}:00`
+      }
+      // Columns are equal-width flex items, so one division maps the pointer to
+      // a bar. Tracking on the plot (not on each column) keeps the tooltip
+      // following the cursor across bar boundaries instead of blinking out.
+      const trackPointer = event => {
+        const node = plotRef.current
+        if (node === null) return
+        const rect = node.getBoundingClientRect()
+        const count = view.points.length
+        if (count === 0 || rect.width <= 0) return
+        const x = event.clientX - rect.left
+        const y = event.clientY - rect.top
+        const index = Math.min(count - 1, Math.max(0, Math.floor(x / (rect.width / count))))
+        const flipX = x > rect.width * 0.55
+        const flipY = y > rect.height * 0.5
+        setHover({ index, left: x + (flipX ? -12 : 12), top: y + (flipY ? -12 : 12), flipX, flipY })
+      }
+      const tip = (() => {
+        if (hover === null) return null
+        const point = view.points[hover.index]
+        if (point === undefined) return null
+        const rows = []
+        if (metric === 'cost') {
+          if (point.peakCost > 0) rows.push({ label: t('phase.peak'), value: formatCost(point.peakCost), tone: 'peak' })
+          if (point.offpeakCost > 0) rows.push({ label: t('phase.offpeak'), value: formatCost(point.offpeakCost), tone: 'offpeak' })
+          const flat = flatOf(point)
+          if (flat > 0) rows.push({ label: t('phase.flat'), value: formatCost(flat), tone: 'solid' })
+        } else {
+          rows.push({ label: t('costColumn'), value: formatCost(point.cost) })
+        }
+        if (metric !== 'requests') rows.push({ label: t('requestsColumn'), value: String(point.requests) })
+        if (metric !== 'tokens') rows.push({ label: t('card.tokens'), value: formatTokens(point.tokens) })
+        return h('div', {
+          className: 'dsh-mc-trend-tip',
+          style: {
+            left: `${hover.left}px`,
+            top: `${hover.top}px`,
+            transform: `translate(${hover.flipX ? '-100%' : '0'}, ${hover.flipY ? '-100%' : '0'})`,
+          },
+        },
+          h('div', { className: 'dsh-mc-trend-tip-head' },
+            h('span', { className: 'dsh-mc-trend-tip-when' }, tipWhen(point)),
+            h('span', { className: 'dsh-mc-trend-tip-value' }, format(valueOf(point)))),
+          rows.map(row => h('div', { key: row.label, className: 'dsh-mc-trend-tip-row' },
+            h('span', { className: 'dsh-mc-trend-tip-label' },
+              row.tone === undefined ? null : h('span', { className: `dsh-mc-trend-swatch dsh-mc-trend-${row.tone}` }),
+              row.label),
+            h('span', { className: 'dsh-mc-trend-tip-amount' }, row.value))))
+      })()
 
-      return h('section', { className: 'dsh-mc-section' },
+      return h('section', { className: 'dsh-mc-section dsh-mc-trend-section' },
         h('div', { className: 'dsh-mc-section-head' },
           h('div', null,
             h('h2', { className: 'dsh-mc-section-title' }, t('trendTitle')),
@@ -1552,7 +1699,9 @@ window.__ModuleLoader__.load({
                   className: 'dsh-mc-trend-plot',
                   role: 'img',
                   'aria-label': `${t('trendAria')} · ${summary}`,
-                  onMouseLeave: () => { setHover(-1) },
+                  ref: plotRef,
+                  onPointerMove: trackPointer,
+                  onPointerLeave: () => { setHover(null) },
                 },
                   h('div', { className: 'dsh-mc-trend-grid', 'aria-hidden': true },
                     h('span', { style: { top: '0%' } }),
@@ -1561,8 +1710,6 @@ window.__ModuleLoader__.load({
                     view.points.map((point, index) => h('div', {
                       key: point.id,
                       className: 'dsh-mc-trend-col',
-                      title: detailOf(point),
-                      onMouseEnter: () => { setHover(index) },
                     },
                       h('span', {
                         className: 'dsh-mc-trend-bar',
@@ -1574,15 +1721,16 @@ window.__ModuleLoader__.load({
                             h('span', { key: 'peak', className: 'dsh-mc-trend-seg dsh-mc-trend-peak', style: { flexGrow: point.peakCost } }),
                             h('span', { key: 'flat', className: 'dsh-mc-trend-seg dsh-mc-trend-solid', style: { flexGrow: flatOf(point) } }),
                           ]
-                        : h('span', { key: 'solid', className: 'dsh-mc-trend-seg dsh-mc-trend-solid', style: { flexGrow: 1 } }))))))),
+                        : h('span', { key: 'solid', className: 'dsh-mc-trend-seg dsh-mc-trend-solid', style: { flexGrow: 1 } }))))),
+                  tip)),
               h('div', { className: 'dsh-mc-trend-xaxis', 'aria-hidden': true },
                 view.points.map((point, index) => h('span', { key: point.id, className: 'dsh-mc-trend-tick' },
                   ticks.has(index) ? labelOf(point) : ''))))
-          : h('div', { className: 'dsh-mc-empty' }, t('trendEmpty')),
+          : h('div', { className: 'dsh-mc-empty' }, filtered ? t('sourcesEmpty') : t('trendEmpty')),
         hasUsage
           ? h('div', { className: 'dsh-mc-footer dsh-mc-trend-footer' },
               h('span', { className: 'dsh-mc-footer-note' },
-                hover >= 0 && view.points[hover] !== undefined ? detailOf(view.points[hover]) : t('trendHint')))
+                hover !== null && view.points[hover.index] !== undefined ? detailOf(view.points[hover.index]) : t('trendHint')))
           : null,
       )
     }
