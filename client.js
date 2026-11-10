@@ -623,7 +623,6 @@ window.__ModuleLoader__.load({
 .dsh-mc-details dt, .dsh-mc-details dd { min-width: 0; margin: 0; }
 .dsh-mc-details dt { color: var(--dsw-alias-label-tertiary); }
 .dsh-mc-details dd { color: var(--dsw-alias-label-secondary); font-variant-numeric: tabular-nums; text-align: right; overflow-wrap: anywhere; }
-.dsh-mc-details dd.dsh-mc-left { text-align: left; }
 .dsh-mc-phase-value { font-weight: 600; }
 .dsh-mc-subhead { margin: 12px 0 6px; color: var(--dsw-alias-label-tertiary); font-size: 11px; letter-spacing: .02em; text-transform: uppercase; }
 .dsh-mc-block { margin-top: 12px; padding-top: 10px; border-top: .5px solid var(--dsw-alias-border-l2); }
@@ -999,17 +998,17 @@ window.__ModuleLoader__.load({
       const rows = []
       if (phase !== null) {
         rows.push(h('dt', { key: 'model' }, t('dialogRoute')),
-          h('dd', { key: 'model-v', className: 'dsh-mc-left' },
+          h('dd', { key: 'model-v' },
             `${phase.provider ?? '—'} / ${phase.model ?? '—'}`))
         rows.push(h('dt', { key: 'key' }, t('dialogKey')),
-          h('dd', { key: 'key-v', className: 'dsh-mc-left' }, phase.key ?? t('mappingUnresolved')))
+          h('dd', { key: 'key-v' }, phase.key ?? t('mappingUnresolved')))
         rows.push(h('dt', { key: 'phase' }, t('dialogPhase')),
           h('dd', { key: 'phase-v' },
             h('span', { className: `dsh-mc-phase-value ${tagClassOf(phase.state)}` }, t(`phase.${phase.state}`)),
             phase.nextAt === null ? null : ` · ${formatNextChange(phase.nextAt, phase.nextState, now, t)}`))
         if (phase.rates !== null) {
           rows.push(h('dt', { key: 'rates' }, t('dialogRates')),
-            h('dd', { key: 'rates-v', className: 'dsh-mc-left' },
+            h('dd', { key: 'rates-v' },
               h('div', null, `${t('dialogRateInput')} ${formatRate(phase.rates.input)} · ${t('dialogRateOutput')} ${formatRate(phase.rates.output)}`),
               h('div', null, `${t('dialogRateCache')} ${formatRate(phase.rates.cacheRead)} · ${t('dialogRateWrite')} ${formatRate(phase.rates.cacheWrite)}`)))
         }
