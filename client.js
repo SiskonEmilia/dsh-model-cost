@@ -56,6 +56,7 @@ window.__ModuleLoader__.load({
       'mapOriginSnapshot': 'Bundled with the plugin',
       'mapSource': 'Source',
       'scanMeta': 'Scanned {scanned} of {available} sessions',
+      'scanCached': '{count} from cache',
       'scanCapped': 'Only the newest {scanned} sessions were scanned.',
       'loading': 'Reading session history…',
       'empty': 'No priced model calls in this range yet.',
@@ -188,6 +189,7 @@ window.__ModuleLoader__.load({
       'mapOriginSnapshot': '随插件内置',
       'mapSource': '来源',
       'scanMeta': '已扫描 {scanned} / {available} 个会话',
+      'scanCached': '{count} 个来自本地缓存',
       'scanCapped': '仅扫描了最新的 {scanned} 个会话。',
       'loading': '正在读取会话记录…',
       'empty': '该范围内还没有可计价的模型调用。',
@@ -1304,7 +1306,9 @@ window.__ModuleLoader__.load({
               h('div', { className: 'dsh-mc-section-head' },
                 h('h2', { className: 'dsh-mc-section-title' }, t(`dimension.${report.dimension}`)),
                 h('span', { className: 'dsh-mc-section-note' },
-                  `${t('scanMeta', { scanned: report.scanned.sessions, available: report.scanned.available })}${report.scanned.capped ? ` · ${t('scanCapped', { scanned: report.scanned.sessions })}` : ''}`)),
+                  `${t('scanMeta', { scanned: report.scanned.sessions, available: report.scanned.available })}`
+                  + `${report.scanned.cached > 0 ? ` · ${t('scanCached', { count: report.scanned.cached })}` : ''}`
+                  + `${report.scanned.capped ? ` · ${t('scanCapped', { scanned: report.scanned.sessions })}` : ''}`)),
               report.groups.length === 0
                 ? h('div', { className: 'dsh-mc-empty' }, t('empty'))
                 : h('table', { className: 'dsh-mc-table' },

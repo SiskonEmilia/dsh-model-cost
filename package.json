@@ -14,6 +14,8 @@
     "index.js",
     "client.js",
     "pricing.js",
+    "usage.js",
+    "cache.js",
     "cordis.patch.yml",
     "data/cost-map.json",
     "README.md"

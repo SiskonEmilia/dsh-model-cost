@@ -7,6 +7,9 @@
  * events, so the reader must skip that inherited prefix: those calls were billed
  * once, under the parent.
  *
+ * {@link scanSessionLog} adds the incremental form: a log that only appended
+ * continues from the earlier cut instead of being read again.
+ *
  * @module dsh-model-cost/usage
  */
 import { count } from './pricing.js'
@@ -60,4 +63,51 @@ export function scanUsage(events, options = {}) {
     }
   }
   return { items, inheritedItems, route, lastSeq: events.at(-1)?.seq ?? 0 }
+}
+
+/**
+ * Continue an earlier read of one Session's log.
+ *
+ * A Session log only appends, so the rows already parsed stay valid and only
+ * the tail is read. The prefix is reused only when it demonstrably still
+ * describes the same log: the same fork cut, an event count that did not
+ * shrink, and the same event at the previous cut (its `seq` is the guard — a
+ * rewritten or migrated artifact fails it and restarts from event 0).
+ * @param {readonly object[]} events - the Session's complete current log.
+ * @param {{inherited?: number, previous?: object|null}} [options] - fork cut and the earlier read, if any.
+ * @returns {{items:object[],inheritedItems:object[],route:{provider:string,model:string}|null,lastSeq:number,parsed:number,inherited:number,reused:boolean}} merged rows, the route in force, and whether anything was parsed.
+ */
+export function scanSessionLog(events, options = {}) {
+  const inherited = Number.isInteger(options.inherited) && options.inherited > 0 ? options.inherited : 0
+  const previous = options.previous ?? null
+  const continues = previous !== null
+    && Number.isInteger(previous.parsed)
+    && previous.parsed <= events.length
+    && (previous.inherited ?? 0) === inherited
+    && (previous.parsed === 0 || previous.lastSeq === events[previous.parsed - 1]?.seq)
+  if (!continues) {
+    const read = scanUsage(events, { inherited })
+    return { ...read, parsed: events.length, inherited, reused: false }
+  }
+  if (previous.parsed === events.length) {
+    return {
+      items: previous.items,
+      inheritedItems: previous.inheritedItems,
+      route: previous.route ?? null,
+      lastSeq: previous.lastSeq,
+      parsed: previous.parsed,
+      inherited,
+      reused: true,
+    }
+  }
+  const read = scanUsage(events, { from: previous.parsed, inherited, route: previous.route ?? null })
+  return {
+    items: [...previous.items, ...read.items],
+    inheritedItems: [...previous.inheritedItems, ...read.inheritedItems],
+    route: read.route,
+    lastSeq: read.lastSeq,
+    parsed: events.length,
+    inherited,
+    reused: false,
+  }
 }

@@ -2,7 +2,7 @@
 // prefix that must not be billed twice.
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { scanUsage } from '../usage.js'
+import { scanSessionLog, scanUsage } from '../usage.js'
 
 const usage = (inputTokens = 10, outputTokens = 2) => ({ inputTokens, outputTokens, cacheReadTokens: 0, cacheWriteTokens: 0 })
 const header = (seq, provider, model) => ({ type: 'request/header', seq, time: 1, data: { header: { config: { provider, model } } } })
@@ -74,5 +74,69 @@ describe('scanUsage', () => {
     assert.deepEqual(read.items, [])
     assert.equal(read.route, null)
     assert.equal(read.lastSeq, 0)
+  })
+})
+
+describe('scanSessionLog', () => {
+  /** Turn one earlier read into the `previous` argument. */
+  const previousOf = (events, inherited = 0) => {
+    const read = scanUsage(events, { inherited })
+    return { ...read, parsed: events.length, inherited }
+  }
+
+  it('reads everything when there is no earlier read', () => {
+    const events = [header(0, 'gateway', 'm'), call(1)]
+    const read = scanSessionLog(events, { inherited: 0 })
+    assert.equal(read.items.length, 1)
+    assert.equal(read.parsed, 2)
+    assert.equal(read.reused, false)
+  })
+
+  it('reuses an unchanged log without parsing again', () => {
+    const events = [header(0, 'gateway', 'm'), call(1)]
+    const previous = previousOf(events)
+    const read = scanSessionLog(events, { inherited: 0, previous })
+    assert.equal(read.reused, true)
+    assert.equal(read.items, previous.items)
+    assert.equal(read.parsed, 2)
+  })
+
+  it('keeps the earlier rows and parses only the appended tail', () => {
+    const prefix = [header(0, 'gateway', 'm'), call(1)]
+    const previous = previousOf(prefix)
+    const full = [...prefix, call(2), call(3)]
+    const read = scanSessionLog(full, { inherited: 0, previous })
+    assert.equal(read.reused, false)
+    assert.equal(read.items.length, 3)
+    assert.equal(read.items[0], previous.items[0])
+    assert.deepEqual(read.items.map(item => item.seq), [1, 2, 3])
+    assert.equal(read.parsed, 4)
+    assert.equal(read.route.provider, 'gateway')
+  })
+
+  it('restarts when the log was rewritten under the same length', () => {
+    const previous = previousOf([header(0, 'gateway', 'm'), call(1)])
+    const rewritten = [header(0, 'gateway', 'm'), call(7)]
+    const read = scanSessionLog(rewritten, { inherited: 0, previous })
+    assert.equal(read.reused, false)
+    assert.deepEqual(read.items.map(item => item.seq), [7])
+  })
+
+  it('restarts when the fork cut changed', () => {
+    const events = [header(0, 'gateway', 'm'), call(1), call(2)]
+    const previous = previousOf(events, 2)
+    const read = scanSessionLog(events, { inherited: 1, previous })
+    assert.equal(read.reused, false)
+    assert.equal(read.items.length, 2)
+    assert.equal(read.inheritedItems.length, 0)
+  })
+
+  it('restarts when the log shrank', () => {
+    const previous = previousOf([header(0, 'gateway', 'm'), call(1), call(2)])
+    const shrunk = [header(0, 'gateway', 'm'), call(9)]
+    const read = scanSessionLog(shrunk, { inherited: 0, previous })
+    assert.equal(read.reused, false)
+    assert.deepEqual(read.items.map(item => item.seq), [9])
+    assert.equal(read.parsed, 2)
   })
 })
