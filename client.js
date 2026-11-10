@@ -636,6 +636,7 @@ window.__ModuleLoader__.load({
 .dsh-mc-trend { display: flex; flex-direction: column; gap: 6px; padding: 14px; }
 .dsh-mc-trend-controls { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 .dsh-mc-trend-legend { display: inline-flex; align-items: center; gap: 5px; color: var(--dsw-alias-label-tertiary); font-size: 11px; }
+.dsh-mc-trend-legend-item { display: inline-flex; align-items: center; gap: 5px; }
 .dsh-mc-trend-swatch { display: inline-block; width: 8px; height: 8px; border-radius: 2px; }
 .dsh-mc-trend-frame { display: flex; gap: 8px; }
 .dsh-mc-trend-yaxis { position: relative; flex: none; width: 48px; height: 148px; color: var(--dsw-alias-label-tertiary); font-size: 10px; font-variant-numeric: tabular-nums; }
@@ -648,7 +649,7 @@ window.__ModuleLoader__.load({
 .dsh-mc-trend-bars { position: absolute; inset: 0; display: flex; align-items: flex-end; }
 .dsh-mc-trend-col { position: relative; display: flex; flex: 1 1 0; flex-direction: column; justify-content: flex-end; align-items: center; min-width: 0; height: 100%; border-radius: 3px; }
 .dsh-mc-trend-col:hover, .dsh-mc-trend-col:focus-visible { background: var(--dsw-alias-interactive-bg-hover); outline: none; }
-.dsh-mc-trend-bar { box-sizing: border-box; display: flex; flex-direction: column; width: 100%; max-width: 26px; min-height: 2px; overflow: hidden; border-radius: 3px 3px 0 0; }
+.dsh-mc-trend-bar { box-sizing: border-box; display: flex; flex-direction: column; width: 100%; max-width: 40px; min-height: 2px; overflow: hidden; border-radius: 3px 3px 0 0; background: var(--dsw-alias-bg-layer-3, rgba(127,127,127,.14)); }
 .dsh-mc-trend-seg { flex: 1 1 0; min-height: 0; }
 .dsh-mc-trend-solid { background: var(--dsw-alias-brand-primary); }
 .dsh-mc-trend-peak { background: var(--dsw-alias-state-warn-primary); }
@@ -1450,7 +1451,8 @@ window.__ModuleLoader__.load({
                   h('span', { className: 'dsh-mc-trend-swatch dsh-mc-trend-offpeak' }), t('phase.offpeak'),
                   h('span', { className: 'dsh-mc-trend-swatch dsh-mc-trend-peak' }), t('phase.peak'),
                   hasFlat
-                    ? h('span', null, h('span', { className: 'dsh-mc-trend-swatch dsh-mc-trend-solid' }), t('phase.flat'))
+                    ? h('span', { className: 'dsh-mc-trend-legend-item' },
+                        h('span', { className: 'dsh-mc-trend-swatch dsh-mc-trend-solid' }), t('phase.flat'))
                     : null),
             h('div', { className: 'dsh-mc-segments', role: 'group', 'aria-label': t('trendMetric') },
               ['cost', 'requests', 'tokens'].map(id => h('button', {
@@ -1498,9 +1500,11 @@ window.__ModuleLoader__.load({
                 view.points.map((point, index) => h('span', { key: point.id, className: 'dsh-mc-trend-tick' },
                   ticks.has(index) ? labelOf(point) : ''))))
           : h('div', { className: 'dsh-mc-empty' }, t('trendEmpty')),
-        h('div', { className: 'dsh-mc-footer' },
-          h('span', { className: 'dsh-mc-footer-note' },
-            hover >= 0 && view.points[hover] !== undefined ? detailOf(view.points[hover]) : t('trendHint'))),
+        hasUsage
+          ? h('div', { className: 'dsh-mc-footer' },
+              h('span', { className: 'dsh-mc-footer-note' },
+                hover >= 0 && view.points[hover] !== undefined ? detailOf(view.points[hover]) : t('trendHint')))
+          : null,
       )
     }
 
