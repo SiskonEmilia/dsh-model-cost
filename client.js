@@ -137,9 +137,8 @@ window.__ModuleLoader__.load({
       'dialogSpent': 'Spent this Session',
       'dialogTokens': 'Tokens this Session',
       'dialogPeakSplit': 'Peak / off-peak spend',
-      'dialogFork': 'Before the fork (inherited)',
-      'dialogForkCalls': '{count} calls',
-      'dialogForkNote': 'Those calls are billed under the parent Session; totals count them once.',
+      'dialogForkExtra': ' (+fork {cost})',
+      'dialogForkNote': '*This Session is a fork; its spend and the parent Session are counted separately.',
       'dialogModels': 'Per-model spend',
       'dialogUnpriced': '{count} unpriced calls',
       'dialogEmpty': 'Nothing priced in this Session yet.',
@@ -270,9 +269,8 @@ window.__ModuleLoader__.load({
       'dialogSpent': '本会话花费',
       'dialogTokens': '本会话 tokens',
       'dialogPeakSplit': '峰 / 谷 花费',
-      'dialogFork': 'fork 前（继承）',
-      'dialogForkCalls': '{count} 次调用',
-      'dialogForkNote': '这部分调用记在父会话名下，全局合计只算一次。',
+      'dialogForkExtra': ' (+fork {cost})',
+      'dialogForkNote': '*当前会话为 fork 对话，和父对话价格分别计算',
       'dialogModels': '分模型花费',
       'dialogUnpriced': '{count} 次未定价',
       'dialogEmpty': '本会话还没有可计价的花费。',
@@ -955,11 +953,6 @@ window.__ModuleLoader__.load({
       rows.push(h('dt', { key: 'tokens' }, t('dialogTokens')),
         h('dd', { key: 'tokens-v' },
           `${formatTokens(totals.inputTokens)} · ${formatTokens(totals.cacheReadTokens)} · ${formatTokens(totals.outputTokens)}`))
-      if (forkBefore !== null) {
-        rows.push(h('dt', { key: 'fork' }, t('dialogFork')),
-          h('dd', { key: 'fork-v' },
-            `${formatCost(forkBefore.cost)} · ${t('dialogForkCalls', { count: forkBefore.requests })}`))
-      }
       if (totals.unpricedRequests > 0) {
         rows.push(h('dt', { key: 'unpriced' }, t('card.unpriced')),
           h('dd', { key: 'unpriced-v' }, t('dialogUnpriced', { count: totals.unpricedRequests })))
@@ -982,7 +975,7 @@ window.__ModuleLoader__.load({
               formatCost(totals.cost),
               forkBefore === null
                 ? null
-                : h('span', { className: 'dsh-mc-panel-extra' }, ` (+${formatCost(forkBefore.cost)})`))),
+                : h('span', { className: 'dsh-mc-panel-extra' }, t('dialogForkExtra', { cost: formatCost(forkBefore.cost) })))),
           h('div', { className: 'dsh-mc-panel-rule', 'aria-hidden': true }),
           h('dl', { className: 'dsh-mc-details' }, rows),
           phase !== null && phase.hasSchedule && (phase.timeline?.length ?? 0) > 0
