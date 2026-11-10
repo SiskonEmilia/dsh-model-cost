@@ -898,11 +898,6 @@ window.__ModuleLoader__.load({
       let stopWatching = null
       let disposed = false
       let directory = null
-      try {
-        directory = ctx.get('modelDirectories')?.directoryFor(sessionId) ?? null
-      } catch (_unavailable) {
-        // Addressed subagent sessions expose no model selection.
-      }
 
       const publish = next => {
         snapshot = next
@@ -921,11 +916,38 @@ window.__ModuleLoader__.load({
         publish({ status: 'idle', value: null, error: null })
       }
 
+      /**
+       * The model the composer is about to use. A just-submitted selection is
+       * `pending` until the Session's projection catches up, and the seat shows
+       * that intent too, so the tag follows it rather than lagging a model behind.
+       */
       const selectionOf = () => {
-        const current = directory === null ? null : directory.store.getSnapshot().current
-        return current === null || current === undefined
+        const state = directory === null ? null : directory.store.getSnapshot()
+        const chosen = state === null ? null : state.pending ?? state.current
+        return chosen === null || chosen === undefined
           ? null
-          : { provider: String(current.provider), model: String(current.model) }
+          : { provider: String(chosen.provider), model: String(chosen.model) }
+      }
+
+      /**
+       * Re-resolve the shared directory and follow the instance now in force.
+       * A re-opened Session gets a fresh directory, and the old store simply
+       * stops moving — holding the first one would freeze the tag on its model.
+       */
+      const watch = () => {
+        let next = null
+        try {
+          next = ctx.get('modelDirectories')?.directoryFor(sessionId) ?? null
+        } catch (_unavailable) {
+          // Addressed subagent Sessions expose no model selection.
+        }
+        if (next === directory) return
+        if (stopWatching !== null) stopWatching()
+        stopWatching = null
+        directory = next
+        if (directory === null) return
+        stopWatching = directory.store.subscribe(followSelection)
+        directory.load().catch(() => { /* the model seat surfaces its own failure */ })
       }
 
       const quote = picked => {
@@ -937,6 +959,13 @@ window.__ModuleLoader__.load({
         }
         return remote.quote({ provider: picked.provider, model: picked.model, timeZone }).then(result => {
           if (disposed || mine !== generation) return
+          // The selection can move while the quote is in flight; drop the stale
+          // answer and follow the new route instead of pinning the old price.
+          const latest = selectionOf()
+          if (latest === null || latest.provider !== picked.provider || latest.model !== picked.model) {
+            followSelection()
+            return
+          }
           if (result?.ok === true) publish({ status: 'ready', value: result.value, error: null })
           else publish({ status: 'error', value: snapshot.value, error: result?.error?.message ?? 'unknown failure' })
         }, error => {
@@ -946,6 +975,7 @@ window.__ModuleLoader__.load({
       }
 
       const load = () => {
+        watch()
         const picked = selectionOf()
         if (picked === null) {
           publishIdle()
@@ -970,13 +1000,11 @@ window.__ModuleLoader__.load({
       const subscribe = listener => {
         listeners.add(listener)
         if (listeners.size === 1) {
-          stopWatching = directory === null ? null : directory.store.subscribe(followSelection)
-          if (directory !== null) {
-            directory.load().catch(() => { /* the model seat surfaces its own failure */ })
-          }
+          watch()
           followSelection()
-          // Tariff boundaries and an updated price map both land within a minute.
-          timer = setInterval(load, 30000)
+          // Tariff boundaries, an updated price map, and a reopened Session's
+          // directory all land within one poll.
+          timer = setInterval(load, 10000)
         }
         let released = false
         return () => {
