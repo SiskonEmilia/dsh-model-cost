@@ -1,6 +1,6 @@
 {
   "name": "dsh-model-cost",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Per-Session and global model spend for DeepSeek Harness, priced with the LiteLLM Model Cost Map including its peak/off-peak windows.",
   "license": "MIT",
   "author": "SiskonEmilia",

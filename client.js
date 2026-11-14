@@ -15,7 +15,7 @@ window.__ModuleLoader__.load({
   factory(require) {
     const React = require('react')
     const ReactDOM = require('react-dom')
-    const { useCallback, useEffect, useMemo, useRef, useState } = React
+    const { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } = React
     const h = React.createElement
 
     /* ------------------------------------------------------------------ */
@@ -28,7 +28,61 @@ window.__ModuleLoader__.load({
     } catch (error) {
       console.warn('[model-cost] UI primitives unavailable', error)
     }
-    const { useAnchoredPosition, useDismissOnOutsidePointer } = primitives
+    const { useDismissOnOutsidePointer } = primitives
+
+    /** Viewport distance the portaled panel keeps from the top edge. */
+    const OVERLAY_TOP_MARGIN = 12
+
+    /**
+     * Anchor a fixed-position portaled panel to its trigger.
+     *
+     * DSH 0.2.2 removed `useAnchoredPosition` from ui-primitives in favor of CSS
+     * anchor positioning; this copy keeps the measured left/top placement the
+     * panels' fixed CSS already expects, without requiring that browser
+     * feature. Measure the anchor, place the panel above or below it, clamp it
+     * inside the viewport, and re-place on scroll (capture phase, so nested
+     * scrollers are caught), resize, and the panel's own size changes.
+     * @param {object} options - open state, anchor and panel refs, side, align, gap, margin.
+     * @returns {object|null} `left`/`top` for the panel, or null before the first measurement.
+     */
+    function useAnchoredPosition({ open, anchorRef, panelRef, side = 'bottom', align = 'start', gap, margin }) {
+      const [position, setPosition] = useState(null)
+      useLayoutEffect(() => {
+        if (!open) {
+          setPosition(null)
+          return undefined
+        }
+        const place = () => {
+          const rect = anchorRef.current?.getBoundingClientRect()
+          if (rect === undefined) return
+          const panel = panelRef.current
+          const width = panel?.offsetWidth ?? 0
+          const height = panel?.offsetHeight ?? 0
+          let left = align === 'end' ? rect.right - width : rect.left
+          let top = side === 'top' ? rect.top - gap - height : rect.bottom + gap
+          if (width > 0) left = Math.min(Math.max(left, margin), window.innerWidth - width - margin)
+          if (height > 0) top = Math.min(Math.max(top, OVERLAY_TOP_MARGIN), window.innerHeight - height - margin)
+          setPosition({ left, top })
+        }
+        // The first run measures the panel in the same commit that opened it,
+        // so the clamp uses real dimensions before anything paints.
+        place()
+        window.addEventListener('scroll', place, true)
+        window.addEventListener('resize', place)
+        const panel = panelRef.current
+        let observer = null
+        if (typeof ResizeObserver !== 'undefined' && panel !== null) {
+          observer = new ResizeObserver(place)
+          observer.observe(panel)
+        }
+        return () => {
+          observer?.disconnect()
+          window.removeEventListener('scroll', place, true)
+          window.removeEventListener('resize', place)
+        }
+      }, [open, anchorRef, panelRef, side, align, gap, margin])
+      return position
+    }
 
     const NS = 'modelCost'
     const PANEL_ID = 'model-cost'
