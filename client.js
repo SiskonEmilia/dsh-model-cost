@@ -726,6 +726,7 @@ window.__ModuleLoader__.load({
 .dsh-mc-badge-bad { color: var(--dsw-alias-state-error-primary); }
 
 .dsh-mc-page { display: flex; flex-direction: column; gap: 18px; box-sizing: border-box; width: 100%; height: 100%; padding: 22px 26px 32px; overflow: auto; color: var(--dsw-alias-label-primary); }
+.dsh-mc-page > * { flex-shrink: 0; }
 .dsh-mc-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
 .dsh-mc-h1 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -.01em; }
 .dsh-mc-sub { margin: 4px 0 0; color: var(--dsw-alias-label-tertiary); font-size: 12px; }
