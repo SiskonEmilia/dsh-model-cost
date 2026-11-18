@@ -21,7 +21,7 @@
  */
 
 /** File layout version. Bump whenever the fields below change incompatibly. */
-export const CACHE_VERSION = 1
+export const CACHE_VERSION = 2
 
 /**
  * Pricing-semantics generation. Bump when `pricing.js` changes what a call
@@ -82,8 +82,32 @@ export function decodeRow(raw, priced) {
 }
 
 /**
+ * Encode one subagent catalog row as `[id, label, mode]`. `local` is derived, so
+ * it is not stored.
+ * @param {object} child - catalog row from the log reader.
+ * @returns {(string|null)[]} encoded row.
+ */
+export function encodeChild(child) {
+  return [child.id, child.label ?? null, child.mode ?? 'unknown']
+}
+
+/**
+ * Decode one subagent catalog row, or reject it when it names no child.
+ * @param {unknown} raw - decoded array from the cache file.
+ * @returns {{id:string,label:string|null,mode:string,local:boolean}|null} catalog row, or null for a malformed row.
+ */
+export function decodeChild(raw) {
+  if (!Array.isArray(raw) || raw.length !== 3) return null
+  const [id, label, mode] = raw
+  if (typeof id !== 'string' || id === '') return null
+  if (label !== null && typeof label !== 'string') return null
+  if (typeof mode !== 'string' || mode === '') return null
+  return { id, label, mode, local: mode === 'one-shot' || mode === 'continuable' }
+}
+
+/**
  * Encode one complete cache file.
- * @param {{sessionId:string,revision:string,parsed:number,inherited:number,lastSeq:number,route:object|null,pricing:string,items:object[],inheritedItems:object[]}} scan - parsed Session state.
+ * @param {{sessionId:string,revision:string,parsed:number,inherited:number,lastSeq:number,route:object|null,pricing:string,items:object[],inheritedItems:object[],children:object[]}} scan - parsed Session state.
  * @returns {object} JSON-serializable entry.
  */
 export function encodeEntry(scan) {
@@ -101,6 +125,7 @@ export function encodeEntry(scan) {
     writtenAt: Date.now(),
     rows: scan.items.map(encodeRow),
     inheritedRows: scan.inheritedItems.map(encodeRow),
+    children: (scan.children ?? []).map(encodeChild),
   }
 }
 
@@ -111,7 +136,7 @@ export function encodeEntry(scan) {
  * as "no cache", because a cache is an optimization and the log is the source
  * of truth.
  * @param {unknown} raw - parsed JSON from the cache file.
- * @returns {{sessionId:string,revision:string,pricing:string,parsed:number,inherited:number,lastSeq:number,route:object|null,items:object[],inheritedItems:object[],writtenAt:number|null}|null} decoded entry, or null.
+ * @returns {{sessionId:string,revision:string,pricing:string,parsed:number,inherited:number,lastSeq:number,route:object|null,items:object[],inheritedItems:object[],children:object[],writtenAt:number|null}|null} decoded entry, or null.
  */
 export function decodeEntry(raw) {
   if (typeof raw !== 'object' || raw === null) return null
@@ -125,6 +150,8 @@ export function decodeEntry(raw) {
   if (!Array.isArray(raw.rows)) return null
   const inheritedRows = raw.inheritedRows === undefined ? [] : raw.inheritedRows
   if (!Array.isArray(inheritedRows)) return null
+  const childRows = raw.children === undefined ? [] : raw.children
+  if (!Array.isArray(childRows)) return null
 
   let route = null
   if (raw.route !== null && raw.route !== undefined) {
@@ -148,6 +175,12 @@ export function decodeEntry(raw) {
     if (decoded === null) return null
     inheritedItems.push(decoded)
   }
+  const children = []
+  for (const row of childRows) {
+    const decoded = decodeChild(row)
+    if (decoded === null) return null
+    children.push(decoded)
+  }
   return {
     sessionId: raw.sessionId,
     revision: raw.revision,
@@ -158,6 +191,7 @@ export function decodeEntry(raw) {
     route,
     items,
     inheritedItems,
+    children,
     writtenAt: Number.isFinite(raw.writtenAt) ? raw.writtenAt : null,
   }
 }

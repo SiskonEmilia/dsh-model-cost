@@ -13,8 +13,8 @@ const { default: ModelCostService } = await import('../index.js')
 const NOW = Date.now()
 const USAGE = { inputTokens: 1_000_000, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }
 
-/** One Session log: a pricing route followed by billed assistant messages. */
-function eventsFor(calls, route = { provider: 'deepseek', model: 'deepseek-v4-flash' }) {
+/** One Session log: a pricing route, billed assistant messages, and its subagent catalog. */
+function eventsFor(calls, route = { provider: 'deepseek', model: 'deepseek-v4-flash' }, children = []) {
   const events = [{
     type: 'request/header',
     seq: 0,
@@ -27,6 +27,20 @@ function eventsFor(calls, route = { provider: 'deepseek', model: 'deepseek-v4-fl
       seq: index + 1,
       time: NOW - 500_000 + index,
       data: { usage: USAGE },
+    })
+  }
+  for (const child of children) {
+    events.push({
+      type: 'subagent/catalog',
+      seq: events.length,
+      time: NOW - 400_000 + events.length,
+      data: {
+        version: 0,
+        childId: child.id,
+        childCreatedAt: NOW - 400_000,
+        mode: child.mode ?? 'continuable',
+        ...(child.label === undefined ? {} : { label: child.label }),
+      },
     })
   }
   return events
@@ -48,13 +62,13 @@ class Corpus {
    * Add one stored Session.
    * @param {string} id - Session id.
    * @param {number} calls - billed assistant messages.
-   * @param {{inherited?: number, revision?: string, route?: {provider:string,model:string}}} [options] - fork cut, starting revision, and the route every call bills under.
+   * @param {{inherited?: number, revision?: string, route?: {provider:string,model:string}, children?: object[]}} [options] - fork cut, starting revision, the route every call bills under, and the subagents it spawned.
    * @returns {Corpus} this corpus.
    */
   add(id, calls, options = {}) {
     this.sessions.set(id, {
       id,
-      events: eventsFor(calls, options.route),
+      events: eventsFor(calls, options.route, options.children),
       revision: options.revision ?? 'r1',
       inherited: options.inherited ?? 0,
     })
@@ -323,6 +337,98 @@ describe('report session cache', () => {
     const dialog = await corpus.service().session('fork', 'UTC')
     assert.equal(dialog.totals.requests, 2)
     assert.equal(dialog.inherited.requests, 1)
+  })
+})
+
+describe('subagent roll-up', () => {
+  it('adds a subagent Session to the panel without double counting the report', async () => {
+    freshHome()
+    const corpus = new Corpus()
+      .add('parent', 2, { children: [{ id: 'kid', label: 'Audit pricing' }] })
+      .add('kid', 3)
+    const service = corpus.service()
+    const panel = await service.session('parent', 'UTC')
+    assert.equal(panel.totals.requests, 2)
+    assert.equal(panel.subagents.totals.requests, 3)
+    assert.equal(panel.subagents.count, 1)
+    assert.equal(panel.subagents.complete, true)
+    assert.equal(panel.subagents.agents[0].label, 'Audit pricing')
+    assert.equal(panel.subagents.agents[0].depth, 1)
+    assert.ok(panel.subagents.agents[0].cost > 0)
+    assert.equal(panel.combined.requests, 5)
+    assert.ok(Math.abs(panel.combined.cost - (panel.totals.cost + panel.subagents.totals.cost)) < 1e-12)
+
+    // The child is also its own Session in the global report; its calls are
+    // billed once there and once in the panel, never twice in either total.
+    const report = await service.report({ range: 'all', dimension: 'session' })
+    assert.equal(report.totals.requests, 5)
+    assert.ok(Math.abs(report.totals.cost - panel.combined.cost) < 1e-9)
+  })
+
+  it('walks grandchildren and keeps the deepest agent at its own depth', async () => {
+    freshHome()
+    const corpus = new Corpus()
+      .add('parent', 1, { children: [{ id: 'kid' }, { id: 'kid-2' }] })
+      .add('kid', 2, { children: [{ id: 'grandkid' }] })
+      .add('kid-2', 1)
+      .add('grandkid', 4)
+    const panel = await corpus.service().session('parent', 'UTC')
+    assert.equal(panel.subagents.count, 3)
+    assert.equal(panel.subagents.totals.requests, 7)
+    assert.equal(panel.combined.requests, 8)
+    const byId = new Map(panel.subagents.agents.map(agent => [agent.id, agent]))
+    assert.equal(byId.get('grandkid').depth, 2)
+    assert.equal(byId.get('grandkid').parentId, 'kid')
+    assert.equal(byId.get('kid-2').depth, 1)
+  })
+
+  it('leaves an unreadable child out and marks the roll-up incomplete', async () => {
+    freshHome()
+    const corpus = new Corpus().add('parent', 2, { children: [{ id: 'ghost' }, { id: 'kid' }] }).add('kid', 1)
+    const panel = await corpus.service().session('parent', 'UTC')
+    assert.equal(panel.subagents.count, 1)
+    assert.equal(panel.subagents.complete, false)
+    assert.equal(panel.subagents.totals.requests, 1)
+    assert.equal(panel.totals.requests, 2)
+  })
+
+  it('counts an external child without pricing it', async () => {
+    freshHome()
+    const corpus = new Corpus().add('parent', 1, { children: [{ id: 'codex', mode: 'external' }] })
+    const panel = await corpus.service().session('parent', 'UTC')
+    assert.equal(panel.subagents.count, 0)
+    assert.equal(panel.subagents.external, 1)
+    assert.equal(panel.subagents.totals.requests, 0)
+    assert.equal(corpus.readsOf('codex'), 0)
+  })
+
+  it('answers the roll-up from the cache after a restart', async () => {
+    const home = freshHome()
+    const corpus = new Corpus()
+      .add('parent', 2, { children: [{ id: 'kid' }] })
+      .add('kid', 3)
+    await corpus.service().session('parent', 'UTC')
+    assert.ok(cacheFiles(home).includes('kid.json'))
+
+    corpus.resetReads()
+    const panel = await corpus.service().session('parent', 'UTC')
+    assert.equal(panel.subagents.totals.requests, 3)
+    assert.equal(corpus.readsOf('parent'), 0)
+    assert.equal(corpus.readsOf('kid'), 0)
+  })
+
+  it('shows the same combined amount while the child is live', async () => {
+    freshHome()
+    const corpus = new Corpus().add('parent', 1, { children: [{ id: 'kid' }] })
+    corpus.goLive('kid', 2)
+    const service = corpus.service()
+    const first = await service.session('parent', 'UTC')
+    assert.equal(first.subagents.totals.requests, 2)
+    assert.equal(corpus.readsOf('kid'), 0)
+    corpus.appendLive('kid')
+    const second = await service.session('parent', 'UTC')
+    assert.equal(second.subagents.totals.requests, 3)
+    assert.equal(second.combined.requests, 4)
   })
 })
 

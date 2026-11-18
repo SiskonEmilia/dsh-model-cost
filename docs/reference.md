@@ -18,6 +18,13 @@
   fork 前的继承花费，底部注释说明当前会话是 fork、与父对话分别计算。
   前缀是 fork 时刻的冻结副本：父会话之后新增的消息只追加到父会话日志，不会进入子会话，
   「fork 前」金额因此不会随父会话继续活动而变化。
+- **子代理花费归发起它的会话**：会话日志里的 `subagent/catalog` 事件记着每个子代理的
+  `childId`、`label` 和 `mode`，Host 按它递归收集子代理（以及子代理再派的分代理），
+  逐个用同一套价目表计价，加到该会话的面板上：`totals` 仍是本会话自己的日志，
+  `subagents.totals` 是收集到的后代合计，`combined` 是两者之和（panel 的标题金额）。
+  每个会话的调用仍只按它自己的日志计价一次——全局统计里子代理是独立会话、单独成行，
+  不会因为面板合过而重复。fork 继承前缀里的 `subagent/catalog` 属于父会话的子代理，
+  同样跳过。
 - 长上下文阶梯价（`input_cost_per_token_above_200k_tokens` 等）、批量/优先档
   （`_batches` / `_priority` / `_flex`）、图片/音频/秒计费暂不参与计算。
 
@@ -67,12 +74,16 @@ node tools/build-cost-map.mjs path/to.json    # 用本地 JSON 生成
 - **计价签名**：`pricing` = 计价引擎版本（`PRICING_VERSION`）+ 价目表内容指纹 + 映射规则指纹。
   签名一致就沿用缓存里的 `cost`/`phase`；更新价目表、改映射规则或升级计价引擎后，
   只对已缓存的行重新定价，不重读日志。
+- **子代理清单**：每个文件还存着该会话 `subagent/catalog` 读出的子代理行（`children`，
+  格式为 `[id, label, mode]`），面板据此递归收集后代，不必重新打开父会话日志。
+  文件格式版本因此是 2；旧版本文件按未命中处理，第一次统计会重读一遍日志后重写。
 - **清理**：写入走「临时文件 + rename」，中断不会留下半截文件；统计时顺手删除已不在
   会话列表里、且超过 7 天的缓存，以及一小时前的临时文件。
 
 ## 数据来源
 
-会话日志的 `request/header` 提供 provider、model，`assistant/message` 提供 usage 与完成时间。
+会话日志的 `request/header` 提供 provider、model，`assistant/message` 提供 usage 与完成时间，
+`subagent/catalog` 提供该会话派出的子代理（`childId`、`label`、`mode`）。
 
 会话枚举与冷会话读取走 `ctx.sessionQuery`，活跃会话走 `ctx.sessions`，
 冷会话的变更判定走 `ctx.sessionPersistence` 报告的 `revision`。
@@ -84,22 +95,28 @@ node tools/build-cost-map.mjs path/to.json    # 用本地 JSON 生成
 | 文件 | 作用 |
 | --- | --- |
 | `index.js` | Host 半边：`modelCost` Remote 服务，读会话日志、算钱、管映射与价目表 |
-| `usage.js` | 会话日志解析：跟踪 `request/header` / `request/context` 的计价路由，抽取 `assistant/message` 的 usage，跳过 fork 继承的前缀；并支持从上次读到的位置续读 |
+| `usage.js` | 会话日志解析：跟踪 `request/header` / `request/context` 的计价路由，抽取 `assistant/message` 的 usage，读取 `subagent/catalog` 的子代理清单，跳过 fork 继承的前缀；并支持从上次读到的位置续读 |
 | `pricing.js` | 纯计价引擎：窗口解析、峰谷判定、今日谷时段换算、单价与成本计算、key 解析、按日序列补空、按小时分桶（无 Cordis 依赖，可直接测试） |
-| `cache.js` | 会话行缓存的文件格式：版本号、行的编码与校验、计价签名 |
+| `cache.js` | 会话行缓存的文件格式：版本号、行与子代理清单的编码校验、计价签名 |
 | `client.js` | 浏览器半边：composer dock 的会话成本 pill、新会话的模型价签、左侧栏全局统计页 |
 | `data/cost-map.json` | 内置精简价目表快照 |
 | `test/pricing.test.mjs` | 计价引擎单测（`node --test "test/*.test.mjs"`） |
-| `test/usage.test.mjs` | 日志解析、续读前缀校验与 fork 前缀跳过单测 |
+| `test/usage.test.mjs` | 日志解析、续读前缀校验、fork 前缀跳过与子代理清单提取单测 |
 | `test/cache.test.mjs` | 缓存格式的编解码与损坏数据拒绝 |
-| `test/service.test.mjs` | Host 服务的端到端行为（重启续用缓存、追加只读尾部、改规则重定价、版本不匹配回退、来源筛选） |
-| `test/support/` | 上述 Host 测试用的 Cordis / Typert 桩与模块解析钩子 |
+| `test/service.test.mjs` | Host 服务的端到端行为（重启续用缓存、追加只读尾部、改规则重定价、版本不匹配回退、来源筛选、子代理合计） |
+| `test/client.test.mjs` | 浏览器半边的渲染测试：pill 与明细面板如何呈现子代理拆分 |
+| `test/support/` | 上述测试用的 Cordis / Typert / React 桩与模块解析钩子 |
 | `tools/build-cost-map.mjs` | 从上游或本地 JSON 重新生成内置快照 |
 | `tools/cli-run.mjs` | 用 Desktop 自带 Electron Node 跑任意 `dsh ...` 子命令（安装、`--dump-config` 等） |
 
 ## 已知限制
 
 - 只在 `assistant/message` 携带 `usage` 时计价；适配器未上报 usage 的调用不计。
+- **外部子代理不计价**：Codex、Claude Code、ACP 这类子代理在外部进程里跑，DSH 日志里没有它们的用量；
+  面板会把它们列成「外部子代理不计价」，而不是当 0 元。只走了外部子代理的会话，
+  面板金额就是本会话自己的花费。
+- 一个会话的合计算到 50 个子代理、5 层深度为止，超出部分不再计入，面板会注明合计不完整；
+  子代理日志读不出来时同样只标注、不阻断面板。
 - 缓存写入价缺失时按输入价计，这是 LiteLLM 的兜底口径，个别供应商的真实账单可能不同。
 - 全局统计一次最多扫描 800 个会话（按最新优先），超出的会提示截断。
 - 会话详情页的标题来自 `session/title`，读取失败时回退到会话 id 前 8 位。

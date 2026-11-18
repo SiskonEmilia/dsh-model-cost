@@ -7,12 +7,36 @@
  * events, so the reader must skip that inherited prefix: those calls were billed
  * once, under the parent.
  *
+ * The same pass collects the Session's durable subagent catalog: every
+ * `subagent/catalog` event names a child Session this one delegated to, so the
+ * Host can attribute a child's spend to the Session that started it. Catalog
+ * events inside a fork's inherited prefix describe the parent's children and
+ * stay out, for the same reason inherited calls do.
+ *
  * {@link scanSessionLog} adds the incremental form: a log that only appended
  * continues from the earlier cut instead of being read again.
  *
  * @module dsh-model-cost/usage
  */
 import { count } from './pricing.js'
+
+/** Child modes that own a local Session whose calls can be priced. */
+const LOCAL_CHILD_MODES = new Set(['one-shot', 'continuable'])
+
+/**
+ * Read one `subagent/catalog` payload into a child row.
+ * @param {unknown} data - event data.
+ * @returns {{id:string,label:string|null,mode:string,local:boolean}|null} child row, or null when the payload names no child.
+ */
+function catalogChild(data) {
+  const childId = data?.childId
+  if (typeof childId !== 'string' || childId === '') return null
+  const label = typeof data.label === 'string' && data.label.trim() !== '' ? data.label.trim() : null
+  const mode = typeof data.mode === 'string' ? data.mode : 'unknown'
+  // An external child executes outside the harness and keeps no local log, so
+  // there is no usage to price; the row still names it for the Host's roll-up.
+  return { id: childId, label, mode, local: LOCAL_CHILD_MODES.has(mode) }
+}
 
 /**
  * Read the priced-call inputs out of one Session's raw event log.
@@ -23,7 +47,7 @@ import { count } from './pricing.js'
  * `route` when continuing an earlier read.
  * @param {readonly object[]} events - the Session's raw log, inherited prefix included.
  * @param {{from?: number, inherited?: number, route?: {provider:string,model:string}|null}} [options] - read window and starting route.
- * @returns {{items: object[], inheritedItems: object[], route: {provider:string,model:string}|null, lastSeq: number}} own usage rows, inherited usage rows, the route now in force, and the log's last seq.
+ * @returns {{items: object[], inheritedItems: object[], route: {provider:string,model:string}|null, lastSeq: number, children: object[]}} own usage rows, inherited usage rows, the route now in force, the log's last seq, and the subagents this Session spawned.
  */
 export function scanUsage(events, options = {}) {
   const from = Number.isInteger(options.from) && options.from > 0 ? options.from : 0
@@ -32,6 +56,9 @@ export function scanUsage(events, options = {}) {
   // Kept apart for the Session dialog, which shows "after the fork (+ before
   // the fork)"; global totals only ever read `items`.
   const inheritedItems = []
+  // Children named after the fork cut: the prefix's catalog events belong to the
+  // parent Session, which already owns those children.
+  const children = []
   let route = options.route ?? null
   for (let position = from; position < events.length; position += 1) {
     const event = events[position]
@@ -45,6 +72,10 @@ export function scanUsage(events, options = {}) {
       if (typeof context?.provider === 'string' && typeof context?.model === 'string') {
         route = { provider: context.provider, model: context.model }
       }
+    } else if (event.type === 'subagent/catalog') {
+      if (position < inherited) continue
+      const child = catalogChild(event.data)
+      if (child !== null) children.push(child)
     } else if (event.type === 'assistant/message') {
       const usage = event.data?.usage
       if (typeof usage !== 'object' || usage === null) continue
@@ -62,7 +93,7 @@ export function scanUsage(events, options = {}) {
       else items.push(row)
     }
   }
-  return { items, inheritedItems, route, lastSeq: events.at(-1)?.seq ?? 0 }
+  return { items, inheritedItems, route, lastSeq: events.at(-1)?.seq ?? 0, children }
 }
 
 /**
@@ -75,7 +106,7 @@ export function scanUsage(events, options = {}) {
  * rewritten or migrated artifact fails it and restarts from event 0).
  * @param {readonly object[]} events - the Session's complete current log.
  * @param {{inherited?: number, previous?: object|null}} [options] - fork cut and the earlier read, if any.
- * @returns {{items:object[],inheritedItems:object[],route:{provider:string,model:string}|null,lastSeq:number,parsed:number,inherited:number,reused:boolean}} merged rows, the route in force, and whether anything was parsed.
+ * @returns {{items:object[],inheritedItems:object[],route:{provider:string,model:string}|null,lastSeq:number,children:object[],parsed:number,inherited:number,reused:boolean}} merged rows, the route in force, this Session's subagents, and whether anything was parsed.
  */
 export function scanSessionLog(events, options = {}) {
   const inherited = Number.isInteger(options.inherited) && options.inherited > 0 ? options.inherited : 0
@@ -95,6 +126,7 @@ export function scanSessionLog(events, options = {}) {
       inheritedItems: previous.inheritedItems,
       route: previous.route ?? null,
       lastSeq: previous.lastSeq,
+      children: previous.children ?? [],
       parsed: previous.parsed,
       inherited,
       reused: true,
@@ -106,6 +138,7 @@ export function scanSessionLog(events, options = {}) {
     inheritedItems: [...previous.inheritedItems, ...read.inheritedItems],
     route: read.route,
     lastSeq: read.lastSeq,
+    children: [...(previous.children ?? []), ...read.children],
     parsed: events.length,
     inherited,
     reused: false,

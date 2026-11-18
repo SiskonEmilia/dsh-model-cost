@@ -39,6 +39,9 @@ const COST_MAP_URL = 'https://raw.githubusercontent.com/BerriAI/litellm/main/mod
 const REMOTE_METHODS = '@deepseek-ai/dsh-typert-protocol/remote-methods'
 const MAX_RULES = 500
 const MAX_SESSIONS_SCANNED = 800
+/** Subagent Sessions folded into one Session's panel, and how deep the walk goes. */
+const MAX_SUBAGENT_AGENTS = 50
+const MAX_SUBAGENT_DEPTH = 5
 const COLD_SCAN_TTL_MS = 10 * 60 * 1000
 const SCAN_BATCH = 8
 /** Rows cached for a Session whose stored log has not appeared in a listing for this long are dropped. */
@@ -103,6 +106,38 @@ function dshHome() {
  */
 function positive(value, fallback) {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback
+}
+
+/**
+ * A zeroed totals record, in the shape `fold` returns.
+ * @returns {object} totals.
+ */
+function emptyTotals() {
+  return {
+    cost: 0, requests: 0, pricedRequests: 0, unpricedRequests: 0,
+    peakCost: 0, offpeakCost: 0,
+    inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0,
+  }
+}
+
+/**
+ * Add one totals record into another, field by field.
+ * @param {object} into - accumulator, mutated.
+ * @param {object} from - totals to add.
+ * @returns {object} the accumulator.
+ */
+function addTotals(into, from) {
+  into.cost += from.cost
+  into.requests += from.requests
+  into.pricedRequests += from.pricedRequests
+  into.unpricedRequests += from.unpricedRequests
+  into.peakCost += from.peakCost
+  into.offpeakCost += from.offpeakCost
+  into.inputTokens += from.inputTokens
+  into.outputTokens += from.outputTokens
+  into.cacheReadTokens += from.cacheReadTokens
+  into.cacheWriteTokens += from.cacheWriteTokens
+  return into
 }
 
 /**
@@ -322,10 +357,12 @@ export default class ModelCostService extends Service {
    * the persistence revision it was read at still matches: an unchanged log is
    * answered from the on-disk cache without opening it, a changed one is read
    * again and its entry rebuilt. A forked Session's inherited prefix is kept
-   * aside: the parent already bills those calls.
+   * aside: the parent already bills those calls. The same read names the
+   * subagent Sessions this one spawned, so `children` is what the panel's
+   * roll-up walks.
    * @param {string} sessionId - Session id.
    * @param {{force?: boolean, revision?: string|null}} [options] - rescan switch and the stored revision the caller already observed.
-   * @returns {Promise<object>} parsed rows with their pricing state and whether this call read the log.
+   * @returns {Promise<object>} parsed rows with their pricing state, the spawned children, and whether this call read the log.
    */
   async scanSession(sessionId, options = {}) {
     const force = options.force === true
@@ -346,6 +383,7 @@ export default class ModelCostService extends Service {
         inherited,
         items: read.items,
         inheritedItems: read.inheritedItems,
+        children: read.children,
         route: read.route,
         lastSeq: read.lastSeq,
         read: !read.reused,
@@ -382,6 +420,7 @@ export default class ModelCostService extends Service {
           inherited: entry.inherited,
           items: entry.items,
           inheritedItems: entry.inheritedItems,
+          children: entry.children,
           route: entry.route,
           lastSeq: entry.lastSeq,
           read: false,
@@ -407,6 +446,7 @@ export default class ModelCostService extends Service {
       inherited,
       items: parsed.items,
       inheritedItems: parsed.inheritedItems,
+      children: parsed.children,
       route: parsed.route,
       lastSeq: parsed.lastSeq,
       read: true,
@@ -556,6 +596,7 @@ export default class ModelCostService extends Service {
       pricing: signature,
       items: scan.items,
       inheritedItems: scan.inheritedItems,
+      children: scan.children,
     }))}\n`
     const target = join(this.cacheDir, cacheFileName(sessionId))
     const temp = `${target}.${process.pid}.${++this.cacheWrites}.tmp`
@@ -621,11 +662,7 @@ export default class ModelCostService extends Service {
    * @returns {{totals:object,models:object[],phase:object|null}} folded facts.
    */
   fold(items, now, timeZone = 'UTC', signature = this.pricingSignature) {
-    const totals = {
-      cost: 0, requests: 0, pricedRequests: 0, unpricedRequests: 0,
-      peakCost: 0, offpeakCost: 0,
-      inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0,
-    }
+    const totals = emptyTotals()
     const routes = new Map()
     let last = null
     for (const item of items) {
@@ -679,6 +716,81 @@ export default class ModelCostService extends Service {
   }
 
   /**
+   * Price every local subagent Session this one spawned, recursively.
+   *
+   * The log already names the children (`subagent/catalog`); each child names
+   * its own, so the walk needs no extra store listing. Every child is priced
+   * exactly once — that is what keeps the parent's combined amount free of
+   * double counting, and the global report untouched. A child whose log cannot
+   * be read is left out and reported as an incomplete roll-up rather than
+   * failing the panel.
+   * @param {string} sessionId - Session whose descendants are folded.
+   * @param {string} signature - pricing signature the rows must carry.
+   * @param {string} timeZone - viewer's IANA zone.
+   * @returns {Promise<{totals:object,agents:object[],external:number,complete:boolean}>} descendant spend, per-agent rows, external children left unpriced, and whether every reachable child was read.
+   */
+  async subagentRollup(sessionId, signature, timeZone) {
+    const totals = emptyTotals()
+    const agents = []
+    const seen = new Set([sessionId])
+    const pending = (this.scans.get(sessionId)?.children ?? [])
+      .map(child => ({ child, depth: 1, parentId: sessionId }))
+    let external = 0
+    let complete = true
+    while (pending.length > 0) {
+      if (agents.length >= MAX_SUBAGENT_AGENTS) {
+        complete = false
+        break
+      }
+      const { child, depth, parentId } = pending.shift()
+      if (seen.has(child.id)) continue
+      seen.add(child.id)
+      // An external child runs outside the harness: it keeps no local log, so
+      // there is no usage to price. The panel says so instead of guessing.
+      if (child.local !== true) {
+        external += 1
+        continue
+      }
+      let scan
+      try {
+        scan = await this.scanSession(child.id)
+      } catch (error) {
+        complete = false
+        this.ctx.logger?.debug?.(`model-cost: subagent ${child.id} unreadable: ${error instanceof Error ? error.message : String(error)}`)
+        continue
+      }
+      const folded = this.fold(scan.items, null, timeZone, signature)
+      addTotals(totals, folded.totals)
+      const route = folded.models[0] ?? null
+      agents.push({
+        id: child.id,
+        label: child.label ?? null,
+        parentId,
+        depth,
+        provider: route?.provider ?? null,
+        model: route?.model ?? null,
+        hasUsage: folded.totals.requests > 0,
+        cost: folded.totals.cost,
+        requests: folded.totals.requests,
+        inputTokens: folded.totals.inputTokens,
+        outputTokens: folded.totals.outputTokens,
+        cacheReadTokens: folded.totals.cacheReadTokens,
+        cacheWriteTokens: folded.totals.cacheWriteTokens,
+        peakCost: folded.totals.peakCost,
+        offpeakCost: folded.totals.offpeakCost,
+      })
+      const nested = scan.children ?? []
+      if (depth >= MAX_SUBAGENT_DEPTH) {
+        if (nested.length > 0) complete = false
+        continue
+      }
+      for (const grandchild of nested) pending.push({ child: grandchild, depth: depth + 1, parentId: child.id })
+    }
+    agents.sort((left, right) => right.cost - left.cost || left.id.localeCompare(right.id))
+    return { totals, agents, external, complete }
+  }
+
+  /**
    * Describe the tariff one route bills under at an instant: the price key it
    * resolves to, the state now in force, the rates that state applies, and
    * today's windows for the timeline.
@@ -712,8 +824,13 @@ export default class ModelCostService extends Service {
   }
 
   /**
-   * One Session's running cost, its per-route split, and the phase its current
-   * route bills under.
+   * One Session's running cost, its per-route split, the phase its current
+   * route bills under, and the spend of every subagent Session it spawned.
+   *
+   * `totals` stays this Session's own log — that is what the global report
+   * prices under this id. `subagents` carries the delegation it started, and
+   * `combined` adds the two for the panel's headline, so a conversation that
+   * handed work to subagents shows what the whole tree cost.
    * @param {string} sessionId - Session id.
    * @param {string} timeZone - viewer's IANA zone, used to render today's off-peak windows.
    * @returns {Promise<object>} session summary.
@@ -722,7 +839,8 @@ export default class ModelCostService extends Service {
     await this.loadIndex()
     await this.loadConfig()
     const signature = this.pricingSignature
-    const scan = await this.scanSession(String(sessionId))
+    const id = String(sessionId)
+    const scan = await this.scanSession(id)
     const zone = typeof timeZone === 'string' && timeZone !== '' ? timeZone : 'UTC'
     const folded = this.fold(scan.items, Date.now(), zone, signature)
     // A fork copies its parent's calls into this log; they are priced for the
@@ -730,11 +848,23 @@ export default class ModelCostService extends Service {
     const inherited = scan.inheritedItems.length === 0
       ? null
       : this.fold(scan.inheritedItems, null, zone, signature).totals
+    const rollup = await this.subagentRollup(id, signature, zone)
+    const combined = addTotals(emptyTotals(), folded.totals)
+    addTotals(combined, rollup.totals)
     return {
-      sessionId: String(sessionId),
+      sessionId: id,
       updatedAt: Date.now(),
-      hasUsage: folded.totals.requests > 0,
+      hasUsage: combined.requests > 0,
       totals: folded.totals,
+      subagents: {
+        totals: rollup.totals,
+        agents: rollup.agents,
+        count: rollup.agents.length,
+        external: rollup.external,
+        complete: rollup.complete,
+        hasUsage: rollup.totals.requests > 0,
+      },
+      combined,
       inherited,
       models: folded.models,
       phase: folded.phase,

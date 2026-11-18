@@ -238,6 +238,14 @@ window.__ModuleLoader__.load({
       'dialogPeakSplit': 'Peak / off-peak spend',
       'dialogForkExtra': ' (+fork {cost})',
       'dialogForkNote': '*This Session is a fork; its spend and the parent Session are counted separately.',
+      'dialogOwn': 'This Session',
+      'dialogSubagents': 'Subagents',
+      'dialogCalls': '{count} calls',
+      'dialogAgents': 'Per-subagent spend',
+      'dialogAgentsMore': '+{count} more',
+      'dialogAgentsExternal': '{count} external subagents are not priced: their usage never reaches this harness.',
+      'dialogAgentsIncomplete': 'Some subagent logs were unreadable; the subagent amount may be low.',
+      'pillAgents': '{count} subagents',
       'dialogModels': 'Per-model spend',
       'dialogUnpriced': '{count} unpriced calls',
       'dialogEmpty': 'Nothing priced in this Session yet.',
@@ -378,6 +386,14 @@ window.__ModuleLoader__.load({
       'dialogPeakSplit': '峰 / 谷 花费',
       'dialogForkExtra': ' (+fork {cost})',
       'dialogForkNote': '*当前会话为 fork 对话，和父对话价格分别计算',
+      'dialogOwn': '本会话',
+      'dialogSubagents': '子代理',
+      'dialogCalls': '{count} 次调用',
+      'dialogAgents': '分代理花费',
+      'dialogAgentsMore': '还有 {count} 个',
+      'dialogAgentsExternal': '{count} 个外部子代理不计价：它们的用量不会经过本机。',
+      'dialogAgentsIncomplete': '部分子代理日志读不到，子代理金额可能偏小。',
+      'pillAgents': '{count} 个子代理',
       'dialogModels': '分模型花费',
       'dialogUnpriced': '{count} 次未定价',
       'dialogEmpty': '本会话还没有可计价的花费。',
@@ -1181,20 +1197,29 @@ window.__ModuleLoader__.load({
       const totals = summary?.totals ?? null
       if (state.status === 'error' && summary === null) return null
       if (summary === null || totals === null) return null
-      if (totals.requests === 0) return null
+      // The headline is the whole delegation: this Session's own calls plus the
+      // subagent Sessions it spawned. `combined` is absent only on an older
+      // host, where own spend is all there is.
+      const combined = summary.combined ?? totals
+      const subagents = summary.subagents ?? null
+      const agentCount = subagents !== null && subagents.totals.requests > 0 ? subagents.count : 0
+      if (combined.requests === 0) return null
 
       const phaseState = phase?.state ?? 'unresolved'
       const tagClass = tagClassOf(phaseState)
       const phaseLabel = phaseState === 'unresolved' ? null : t(`phaseShort.${phaseState}`)
-      const amount = formatCost(totals.cost)
-      const label = phaseLabel === null
-        ? amount
-        : h(React.Fragment, null,
-            amount,
-            h('span', { className: 'dsh-mc-sep', 'aria-hidden': true }, '·'),
-            phaseLabel,
-          )
-      const aria = `${t('dialogTitle')} ${amount}${phaseLabel === null ? '' : ` · ${t(`phase.${phaseState}`)}`}`
+      const amount = formatCost(combined.cost)
+      const agentLabel = agentCount === 0 ? null : t('pillAgents', { count: agentCount })
+      const parts = [amount]
+      if (agentLabel !== null) parts.push(agentLabel)
+      if (phaseLabel !== null) parts.push(phaseLabel)
+      const label = h(React.Fragment, null, parts.flatMap((part, index) => [
+        index === 0 ? null : h('span', { key: `sep-${index}`, className: 'dsh-mc-sep', 'aria-hidden': true }, '·'),
+        part,
+      ]).filter(part => part !== null))
+      const aria = `${t('dialogTitle')} ${amount}`
+        + (agentLabel === null ? '' : ` · ${agentLabel}`)
+        + (phaseLabel === null ? '' : ` · ${t(`phase.${phaseState}`)}`)
 
       return h('span', { ref: popover.rootRef, className: 'dsh-mc-anchor', 'data-composer-stat': PILL_ID },
         h('button', {
@@ -1224,6 +1249,12 @@ window.__ModuleLoader__.load({
      */
     function renderPillPanel(popover, summary, t, openPage) {
       const { totals, phase, models } = summary
+      // The panel reports one delegation tree: this Session's own calls plus
+      // every subagent Session it spawned, which the host priced under those
+      // child ids. `combined` is absent only on an older host.
+      const combined = summary.combined ?? totals
+      const subagents = summary.subagents ?? null
+      const agentSpend = subagents !== null && subagents.totals.requests > 0 ? subagents : null
       // A fork carries its parent's spend as context; show it beside the child's
       // own amount, but it is already billed under the parent.
       const inherited = summary.inherited ?? null
@@ -1247,14 +1278,25 @@ window.__ModuleLoader__.load({
               h('div', null, `${t('dialogRateCache')} ${formatRate(phase.rates.cacheRead)} · ${t('dialogRateWrite')} ${formatRate(phase.rates.cacheWrite)}`)))
         }
       }
+      // Only split the amount once there is something to split; a Session that
+      // never delegated keeps its plain token and request rows.
+      if (agentSpend !== null) {
+        rows.push(h('dt', { key: 'own' }, t('dialogOwn')),
+          h('dd', { key: 'own-v' },
+            `${formatCost(totals.cost)} · ${t('dialogCalls', { count: totals.requests })}`))
+        rows.push(h('dt', { key: 'subagents' }, t('dialogSubagents')),
+          h('dd', { key: 'subagents-v' },
+            `${formatCost(agentSpend.totals.cost)} · ${t('dialogCalls', { count: agentSpend.totals.requests })} · ${t('pillAgents', { count: agentSpend.count })}`))
+      }
       rows.push(h('dt', { key: 'tokens' }, t('dialogTokens')),
         h('dd', { key: 'tokens-v' },
-          `${formatTokens(totals.inputTokens)} · ${formatTokens(totals.cacheReadTokens)} · ${formatTokens(totals.outputTokens)}`))
-      rows.push(h('dt', { key: 'requests' }, t('card.requests')), h('dd', { key: 'requests-v' }, String(totals.requests)))
-      if (totals.unpricedRequests > 0) {
+          `${formatTokens(combined.inputTokens)} · ${formatTokens(combined.cacheReadTokens)} · ${formatTokens(combined.outputTokens)}`))
+      rows.push(h('dt', { key: 'requests' }, t('card.requests')), h('dd', { key: 'requests-v' }, String(combined.requests)))
+      if (combined.unpricedRequests > 0) {
         rows.push(h('dt', { key: 'unpriced' }, t('card.unpriced')),
-          h('dd', { key: 'unpriced-v' }, t('dialogUnpriced', { count: totals.unpricedRequests })))
+          h('dd', { key: 'unpriced-v' }, t('dialogUnpriced', { count: combined.unpricedRequests })))
       }
+      const agentRows = agentSpend === null ? [] : agentSpend.agents.slice(0, 6)
 
       return ReactDOM.createPortal(
         h('div', {
@@ -1270,20 +1312,37 @@ window.__ModuleLoader__.load({
               h(PriceTag, { size: 14 }),
               t('dialogTitle')),
             h('span', null,
-              formatCost(totals.cost),
+              formatCost(combined.cost),
               forkBefore === null
                 ? null
                 : h('span', { className: 'dsh-mc-panel-extra' }, t('dialogForkExtra', { cost: formatCost(forkBefore.cost) })))),
           h('div', { className: 'dsh-mc-panel-rule', 'aria-hidden': true }),
           h('dl', { className: 'dsh-mc-details' }, rows),
+          agentRows.length === 0
+            ? null
+            : h('div', null,
+                h('div', { className: 'dsh-mc-subhead' }, t('dialogAgents')),
+                agentRows.map((row, index) => h('div', { className: 'dsh-mc-model-row', key: `${row.id}-${index}` },
+                  h('span', { className: 'dsh-mc-model-key' }, row.label ?? row.id.slice(0, 8)),
+                  h('span', { className: 'dsh-mc-model-cost' }, formatCost(row.cost)))),
+                agentSpend.agents.length > agentRows.length
+                  ? h('div', { className: 'dsh-mc-model-row' },
+                      h('span', { className: 'dsh-mc-model-key' }, t('dialogAgentsMore', { count: agentSpend.agents.length - agentRows.length })))
+                  : null),
+          subagents !== null && subagents.complete === false
+            ? h('div', { className: 'dsh-mc-note' }, t('dialogAgentsIncomplete'))
+            : null,
+          subagents !== null && subagents.external > 0
+            ? h('div', { className: 'dsh-mc-note' }, t('dialogAgentsExternal', { count: subagents.external }))
+            : null,
           phase !== null && phase.hasSchedule && (phase.timeline?.length ?? 0) > 0
             ? h('div', { className: 'dsh-mc-block' },
                 h('div', { className: 'dsh-mc-block-caption' }, t('timelineCaption')),
                 h(PhaseTimeline, { segments: phase.timeline, nowAt: now, t }))
             : null,
-          totals.peakCost > 0 || totals.offpeakCost > 0
+          combined.peakCost > 0 || combined.offpeakCost > 0
             ? h('div', { className: 'dsh-mc-note' },
-                `${t('dialogPeakSplit')}: ${formatCost(totals.peakCost)} / ${formatCost(totals.offpeakCost)}`)
+                `${t('dialogPeakSplit')}: ${formatCost(combined.peakCost)} / ${formatCost(combined.offpeakCost)}`)
             : null,
           models.length > 1
             ? h('div', null,

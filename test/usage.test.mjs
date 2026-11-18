@@ -8,6 +8,12 @@ const usage = (inputTokens = 10, outputTokens = 2) => ({ inputTokens, outputToke
 const header = (seq, provider, model) => ({ type: 'request/header', seq, time: 1, data: { header: { config: { provider, model } } } })
 const context = (seq, provider, model) => ({ type: 'request/context', seq, time: 2, data: { provider, model } })
 const call = (seq, tokens = usage()) => ({ type: 'assistant/message', seq, time: 3 + seq, data: { usage: tokens } })
+const catalog = (seq, childId, mode = 'continuable', label = undefined) => ({
+  type: 'subagent/catalog',
+  seq,
+  time: 5 + seq,
+  data: { version: 0, childId, childCreatedAt: 4 + seq, mode, ...(label === undefined ? {} : { label }) },
+})
 
 describe('scanUsage', () => {
   it('reads one usage row per assistant message and pricing route', () => {
@@ -74,6 +80,47 @@ describe('scanUsage', () => {
     assert.deepEqual(read.items, [])
     assert.equal(read.route, null)
     assert.equal(read.lastSeq, 0)
+  })
+})
+
+describe('subagent catalog', () => {
+  it('names every child this Session spawned', () => {
+    const read = scanUsage([header(0, 'gateway', 'm'), catalog(1, 'kid-1', 'continuable', 'Audit pricing'), call(2)])
+    assert.deepEqual(read.children, [{ id: 'kid-1', label: 'Audit pricing', mode: 'continuable', local: true }])
+    // A one-shot child owns a local log too, so its spend is priceable.
+    assert.deepEqual(scanUsage([catalog(0, 'kid-2', 'one-shot')]).children,
+      [{ id: 'kid-2', label: null, mode: 'one-shot', local: true }])
+  })
+
+  it('marks an external child as one that keeps no local log', () => {
+    const read = scanUsage([catalog(0, 'kid-3', 'external')])
+    assert.equal(read.children.length, 1)
+    assert.equal(read.children[0].local, false)
+  })
+
+  it('drops catalog events copied into a fork prefix', () => {
+    const events = [header(0, 'gateway', 'm'), catalog(1, 'parent-kid'), call(2)]
+    const read = scanUsage(events, { inherited: 2 })
+    assert.deepEqual(read.children, [])
+    // The fork's own delegation after the cut still counts.
+    const owned = scanUsage([...events, catalog(3, 'own-kid')], { inherited: 2 })
+    assert.deepEqual(owned.children.map(child => child.id), ['own-kid'])
+  })
+
+  it('ignores a catalog payload that names no child', () => {
+    const read = scanUsage([{ type: 'subagent/catalog', seq: 0, time: 1, data: { mode: 'one-shot' } }])
+    assert.deepEqual(read.children, [])
+  })
+
+  it('keeps the children across an incremental read', () => {
+    const prefix = [header(0, 'gateway', 'm'), catalog(1, 'kid-1'), call(2)]
+    const first = scanUsage(prefix)
+    const full = [...prefix, catalog(3, 'kid-2'), call(4)]
+    const second = scanSessionLog(full, {
+      inherited: 0,
+      previous: { ...first, parsed: prefix.length, inherited: 0 },
+    })
+    assert.deepEqual(second.children.map(child => child.id), ['kid-1', 'kid-2'])
   })
 })
 

@@ -27,6 +27,7 @@ const entry = (overrides = {}) => ({
   pricing: 'p1:map:rules',
   items: [row()],
   inheritedItems: [row({ phase: 'peak' })],
+  children: [{ id: 'kid-1', label: 'Audit pricing', mode: 'continuable', local: true }],
   ...overrides,
 })
 
@@ -51,6 +52,11 @@ describe('cache row encoding', () => {
   it('stamps every decoded row with the pricing it was written at', () => {
     const decoded = decodeEntry(JSON.parse(JSON.stringify(encodeEntry(entry({ pricing: 'p1:other:rules' })))))
     assert.equal(decoded.items[0].priced, 'p1:other:rules')
+  })
+
+  it('round-trips the spawned subagents', () => {
+    const decoded = decodeEntry(JSON.parse(JSON.stringify(encodeEntry(entry()))))
+    assert.deepEqual(decoded.children, [{ id: 'kid-1', label: 'Audit pricing', mode: 'continuable', local: true }])
   })
 
   it('rejects a row whose phase is unknown', () => {
@@ -91,6 +97,23 @@ describe('cache entry validation', () => {
     const encoded = encodeEntry(entry())
     encoded.rows = [...encoded.rows, ['broken']]
     assert.equal(decodeEntry(encoded), null)
+  })
+
+  it('refuses a damaged subagent row', () => {
+    const encoded = encodeEntry(entry())
+    encoded.children = [...encoded.children, ['kid-2', null]]
+    assert.equal(decodeEntry(encoded), null)
+    const unnamed = encodeEntry(entry())
+    unnamed.children = [['', null, 'one-shot']]
+    assert.equal(decodeEntry(unnamed), null)
+  })
+
+  it('treats a missing children list as empty', () => {
+    const encoded = encodeEntry(entry())
+    delete encoded.children
+    const decoded = decodeEntry(encoded)
+    assert.notEqual(decoded, null)
+    assert.deepEqual(decoded.children, [])
   })
 
   it('treats a missing inheritedRows list as empty', () => {
